@@ -1,0 +1,357 @@
+"""Two-index (alternating h/T) Monte Carlo estimator for homogenized coefficients, d = 2.
+
+Implements the scheme of B. C. White, "Two-Index Monte Carlo Method for Approximating
+Coefficients of Linear Elliptic Problems" (ISTA MSc thesis, 2026):
+
+  * coefficient field   a(x) = A(g(x)) I,  A(g) = exp(beta * tanh g),
+                        g a centred, stationary, smooth Gaussian field on the torus
+                        U_L = [0, L)^2 (Definition 12, "tame Gaussian coefficients");
+  * full corrector      phi in V_h:  int a (e_i + grad phi).grad eta + (1/T) phi eta = 0
+                        (Definition 9), V_h = periodic Q_p Lagrange elements on a uniform
+                        n x n quadrilateral mesh, standard nodal basis;
+  * coefficient         a^{L,T,h} e_i = L^{-2} int_U a (e_i + grad phi_i)   (Definition 10.3),
+                        evaluated with tensor Gauss-Legendre quadrature, (p+1)^2 points/cell;
+  * estimator           a_MC of Definition 13 / Eq. (5) with sample sizes of Eq. (11);
+  * linear solver       unpreconditioned conjugate gradients (as assumed in Lemma 15).
+
+Theorem numbers follow the final version of the thesis (Theorem 17 needs p >= d + 1 = 3).
+
+Reference value: for this ensemble the law of a equals the law of 1/a (g -> -g) and is
+invariant under 90-degree rotations, so by Dykhne's duality the exact homogenized
+matrix is  a_bar = I.  Errors are measured against I.
+"""
+from __future__ import annotations
+
+import math
+import time
+from dataclasses import dataclass, field, asdict
+
+import numpy as np
+import scipy.sparse as sp
+from numpy.polynomial.legendre import leggauss
+
+
+# --------------------------------------------------------------------------------------
+# Configuration
+# --------------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class Config:
+    p: int = 2                 # polynomial degree of the Q_p elements (scheme parameter)
+    nu: float = 3.5            # Matern smoothness; Def. 12 needs nu > p + 1
+    ell: float = 0.25          # Matern length parameter (correlation ~0.29 at |x| = 1)
+    beta: float = 1.0          # contrast: a in (e^-beta, e^beta)
+    tail_tol: float = 1e-6     # discarded fraction of the field variance (Fourier cut-off)
+    cg_c: float = 1e-4         # CG relative tolerance = cg_c * (h/L)^d   (Lemma 15: eps ~ (h/L)^d)
+    cg_maxiter: int = 200_000
+
+    def to_dict(self):
+        return asdict(self)
+
+
+# --------------------------------------------------------------------------------------
+# Gaussian coefficient field on the torus
+# --------------------------------------------------------------------------------------
+class GaussianCoefficient:
+    """Periodised Matern-type Gaussian field on [0, L)^2, unit variance.
+
+    g(x) = sum_m ghat_m exp(i k_m . x),   k_m = 2 pi m / L,
+    E|ghat_m|^2 = S(k_m) (2 pi / L)^2 / int S,   S(k) = (1 + ell^2 |k|^2)^(-(nu + 1)).
+
+    Sampling the spectral density on the dual lattice is exactly periodising the
+    whole-space covariance, so the ensemble is the same for every L.  S(k) decays like
+    |k|^(-2 nu - 2) = |k|^(-d - 2(p+1) - eps) for nu > p + 1, as Definition 12 requires.
+    Modes with |k| > K are dropped, where (ell K)^(-2 nu) = tail_tol is the discarded
+    variance fraction; the truncated ensemble keeps all symmetries (a <-> 1/a, rotations).
+    """
+
+    def __init__(self, L: float, cfg: Config):
+        self.L, self.cfg = L, cfg
+        kcut = cfg.tail_tol ** (-1.0 / (2 * cfg.nu)) / cfg.ell
+        mmax = int(math.ceil(kcut * L / (2 * math.pi)))
+        self.Mg = Mg = 2 * mmax + 1                       # odd => exact Hermitian symmetry
+        self.m = np.fft.fftfreq(Mg, 1.0 / Mg).round().astype(np.int64)
+        k = 2 * math.pi * self.m / L
+        k2 = k[:, None] ** 2 + k[None, :] ** 2
+        S = (1.0 + cfg.ell ** 2 * k2) ** (-(cfg.nu + 1.0))
+        S[k2 > kcut ** 2] = 0.0
+        S_int = math.pi / (cfg.ell ** 2 * cfg.nu)       # int_{R^2} S(k) dk
+        # fft2 of real white noise has E|.|^2 = Mg^2 per mode
+        self.amp = np.sqrt(S / S_int) * (2 * math.pi / L) / Mg
+        self.variance = float((self.amp ** 2).sum() * Mg ** 2)
+        self._fold_cache: dict = {}
+
+    def sample(self, rng: np.random.Generator) -> np.ndarray:
+        """Fourier coefficients ghat (Mg x Mg, FFT ordering) of one realisation."""
+        return np.fft.fft2(rng.standard_normal((self.Mg, self.Mg))) * self.amp
+
+    def _fold(self, n: int, shift: float) -> sp.csr_matrix:
+        """Sparse n x Mg map  c -> sum_{m = j mod n} c_m exp(2 pi i m shift / n)."""
+        key = (n, shift)
+        F = self._fold_cache.get(key)
+        if F is None:
+            phase = np.exp(2j * math.pi * self.m * shift / n)
+            F = sp.csr_matrix((phase, (self.m % n, np.arange(self.Mg))), shape=(n, self.Mg))
+            self._fold_cache[key] = F
+        return F
+
+    def g_on_grid(self, ghat: np.ndarray, n: int, shifts: np.ndarray) -> np.ndarray:
+        """g at the points x = (L/n)(i + s_x, j + s_y), s_x, s_y in `shifts`.
+
+        Exact evaluation of the trigonometric polynomial: for a fixed sub-cell shift the
+        points form a uniform n-grid, so after folding aliased modes (m mod n) and applying
+        the shift phase it is a plain inverse FFT of size n x n.
+        Returns an array of shape (n, nq, n, nq) indexed [ix, qx, iy, qy].
+        """
+        nq = len(shifts)
+        out = np.empty((n, nq, n, nq))
+        for qx, sx in enumerate(shifts):
+            B = self._fold(n, sx) @ ghat                       # (n, Mg)
+            for qy, sy in enumerate(shifts):
+                C = (self._fold(n, sy) @ B.T).T                # (n, n)
+                out[:, qx, :, qy] = (np.fft.ifft2(C) * (n * n)).real
+        return out
+
+    def coefficient(self, g: np.ndarray) -> np.ndarray:
+        return np.exp(self.cfg.beta * np.tanh(g))
+
+
+# --------------------------------------------------------------------------------------
+# Periodic Q_p finite elements on a uniform quadrilateral mesh
+# --------------------------------------------------------------------------------------
+def lagrange_1d(p: int, x: np.ndarray):
+    """Values and derivatives of the equispaced-node Lagrange basis on [0, 1] at x."""
+    nodes = np.linspace(0.0, 1.0, p + 1)
+    C = np.linalg.inv(np.vander(nodes, p + 1, increasing=True))   # coeffs (power, basis)
+    V = np.vander(x, p + 1, increasing=True)
+    dV = np.zeros_like(V)
+    dV[:, 1:] = V[:, :-1] * np.arange(1, p + 1)
+    return V @ C, dV @ C
+
+
+class QpMesh:
+    """Q_p Lagrange space on the periodic n x n mesh of [0, L)^2 (h = L / n).
+
+    DOFs: nodes (i/p) h on each axis, i = 0..n p - 1, periodic; Ndof = (n p)^2.
+    Quadrature: tensor Gauss-Legendre with p + 1 points per direction (exact for Q_{2p+1}).
+    """
+
+    def __init__(self, L: float, n: int, p: int):
+        self.L, self.n, self.p = L, n, p
+        self.h = h = L / n
+        self.Np = Np = n * p
+        self.Ndof = Np * Np
+        nq = p + 1
+        xg, wg = leggauss(nq)
+        self.xq = 0.5 * (xg + 1.0)                    # Gauss points on [0, 1]
+        wq = 0.5 * wg
+        B, D = lagrange_1d(p, self.xq)                # (nq, p+1)
+        nloc = (p + 1) ** 2
+        # reference-element tables, rows Q = qx*nq + qy, cols A = a*(p+1) + b
+        N2 = np.einsum("xa,yb->xyab", B, B).reshape(nq * nq, nloc)
+        Gx = np.einsum("xa,yb->xyab", D, B).reshape(nq * nq, nloc)
+        Gy = np.einsum("xa,yb->xyab", B, D).reshape(nq * nq, nloc)
+        w2 = np.outer(wq, wq).ravel()
+        self.w2 = w2
+        # in 2D the reference stiffness kernel is h-independent: (1/h)^2 * h^2
+        self.Kker = (w2[:, None, None] * (Gx[:, :, None] * Gx[:, None, :]
+                                          + Gy[:, :, None] * Gy[:, None, :])).reshape(nq * nq, nloc * nloc)
+        Mloc = h * h * np.einsum("q,qa,qb->ab", w2, N2, N2)
+        # load-vector kernels:  -int a d_i N_A = -h * sum_Q a_Q w_Q dN_A/dxi_i
+        self.Rker = [-h * w2[:, None] * Gx, -h * w2[:, None] * Gy]
+        # connectivity
+        e = np.arange(n)
+        a = np.arange(p + 1)
+        gx = (e[:, None] * p + a[None, :]) % Np                   # (n, p+1)
+        conn = (gx[:, None, :, None] * Np + gx[None, :, None, :])  # (ex, ey, a, b)
+        self.conn = conn.reshape(n * n, nloc)
+        # CSR pattern and scatter map (element entry -> CSR data slot)
+        rows = np.repeat(self.conn, nloc, axis=1).ravel()
+        cols = np.tile(self.conn, (1, nloc)).ravel()
+        keys = rows.astype(np.int64) * self.Ndof + cols
+        ukeys, inv = np.unique(keys, return_inverse=True)
+        self.scatter = inv.astype(np.int32)
+        self.nnz = len(ukeys)
+        urows = (ukeys // self.Ndof).astype(np.int64)
+        self.indices = (ukeys % self.Ndof).astype(np.int32)
+        self.indptr = np.concatenate([[0], np.cumsum(np.bincount(urows, minlength=self.Ndof))]).astype(np.int32)
+        self.Mdata = np.bincount(self.scatter, weights=np.tile(Mloc.ravel(), n * n), minlength=self.nnz)
+
+    def coef_at_quad(self, field: GaussianCoefficient, ghat: np.ndarray) -> np.ndarray:
+        """a at the quadrature points, shape (n_el, nq^2)."""
+        g = field.g_on_grid(ghat, self.n, self.xq)          # (ex, qx, ey, qy)
+        nq = self.p + 1
+        a4 = field.coefficient(g).transpose(0, 2, 1, 3)       # (ex, ey, qx, qy)
+        return np.ascontiguousarray(a4).reshape(self.n * self.n, nq * nq)
+
+    def stiffness_data(self, aq: np.ndarray) -> np.ndarray:
+        return np.bincount(self.scatter, weights=(aq @ self.Kker).ravel(), minlength=self.nnz)
+
+    def matrix(self, Kdata: np.ndarray, T: float) -> sp.csr_matrix:
+        return sp.csr_matrix((Kdata + self.Mdata / T, self.indices, self.indptr),
+                             shape=(self.Ndof, self.Ndof))
+
+    def rhs(self, aq: np.ndarray) -> np.ndarray:
+        """Columns b_i(eta) = -int a e_i . grad eta, i = 1, 2."""
+        return np.stack([np.bincount(self.conn.ravel(), weights=(aq @ R).ravel(), minlength=self.Ndof)
+                         for R in self.Rker], axis=1)
+
+    def homogenized(self, aq: np.ndarray, b: np.ndarray, phi: np.ndarray) -> np.ndarray:
+        """a^{L,T,h}_{ji} = e_j . L^{-2} int a (e_i + grad phi_i)
+                         = L^{-2} ( delta_ij int a  -  b_j . phi_i )   (same quadrature)."""
+        mean_a = self.h * self.h * float((aq * self.w2).sum())
+        return (mean_a * np.eye(2) - b.T @ phi) / self.L ** 2
+
+    def quad_points(self):
+        """Physical coordinates and weights of all quadrature points, each of shape (n_el * nq^2,)."""
+        n, nq = self.n, self.p + 1
+        x = self.h * (np.arange(n)[:, None] + self.xq[None, :])                 # (n, nq)
+        X1 = np.broadcast_to(x[:, None, :, None], (n, n, nq, nq)).ravel()
+        X2 = np.broadcast_to(x[None, :, None, :], (n, n, nq, nq)).ravel()
+        W = np.broadcast_to(self.h ** 2 * self.w2, (n * n, nq * nq)).ravel()
+        return X1, X2, W
+
+    def eval_grad(self, phi: np.ndarray, x1: np.ndarray, x2: np.ndarray, chunk: int = 200_000):
+        """Gradients of the FE functions phi (Ndof, m) at arbitrary points; returns (P, m, 2)."""
+        p, n, h = self.p, self.n, self.h
+        out = np.empty((len(x1), phi.shape[1], 2))
+        for s in range(0, len(x1), chunk):
+            u, v = x1[s:s + chunk] / h, x2[s:s + chunk] / h
+            ex, ey = np.floor(u), np.floor(v)
+            Bx, Dx = lagrange_1d(p, u - ex)
+            By, Dy = lagrange_1d(p, v - ey)
+            e = (ex.astype(np.int64) % n) * n + (ey.astype(np.int64) % n)
+            coef = phi[self.conn[e]]                                            # (P, nloc, m)
+            gx = np.einsum("Pa,Pb,Pabm->Pm", Dx, By, coef.reshape(len(e), p + 1, p + 1, -1)) / h
+            gy = np.einsum("Pa,Pb,Pabm->Pm", Bx, Dy, coef.reshape(len(e), p + 1, p + 1, -1)) / h
+            out[s:s + chunk, :, 0], out[s:s + chunk, :, 1] = gx, gy
+        return out
+
+
+# --------------------------------------------------------------------------------------
+# Conjugate gradients, several right-hand sides at once (independent CG per column)
+# --------------------------------------------------------------------------------------
+def cg(A: sp.csr_matrix, B: np.ndarray, rtol: float, maxiter: int):
+    X = np.zeros_like(B)
+    R = B.copy()
+    P = R.copy()
+    rr = np.einsum("ij,ij->j", R, R)
+    tol2 = rtol ** 2 * rr
+    active = rr > tol2
+    it = 0
+    while active.any() and it < maxiter:
+        Q = A @ P
+        pq = np.einsum("ij,ij->j", P, Q)
+        alpha = np.divide(rr, pq, out=np.zeros_like(rr), where=active)
+        X += alpha * P
+        R -= alpha * Q
+        rr_new = np.einsum("ij,ij->j", R, R)
+        beta = np.divide(rr_new, rr, out=np.zeros_like(rr), where=active)
+        P = R + beta * P
+        rr = rr_new
+        active = rr > tol2
+        it += 1
+    if active.any():
+        raise RuntimeError(f"CG did not converge in {maxiter} iterations")
+    return X, it
+
+
+# --------------------------------------------------------------------------------------
+# Level hierarchy of the alternating scheme (Chapter 3)
+# --------------------------------------------------------------------------------------
+@dataclass
+class Term:
+    kind: str          # "base", "dh" or "dT"
+    k: int             # level index
+    n_fine: int        # mesh of the first (finer / larger-T) evaluation
+    T_fine: float
+    n_coarse: int      # mesh of the subtracted evaluation (= n_fine for dT; unused for base)
+    T_coarse: float
+    N: int             # number of samples, Eq. (11)
+
+    @property
+    def label(self):
+        return "base" if self.kind == "base" else f"{'Δh' if self.kind == 'dh' else 'ΔT'}_{self.k}"
+
+
+def hierarchy(L: int, cfg: Config) -> list[Term]:
+    """Terms of Eq. (5) with h_F = L^{-1/p}, zeta = 2^{1/p}, T_k = 4^k, k_F = 2 log_4 L.
+
+    The mesh at level k has n_k = round(L zeta^k) cells per side (L/h_k must be an integer
+    on the torus); sample sizes use the nominal h_k = zeta^{-k} in Eq. (11):
+    N_bc = L^2,  N^(h)_k = ceil(L^2 h_k^{2p}),  N^(T)_k = ceil(L^2 h_{k+1}^{2p}).
+    """
+    K = int(round(math.log2(L)))
+    if 2 ** K != L:
+        raise ValueError("L must be a power of 2 so that 2 log_4 L is an integer")
+    p = cfg.p
+    zeta = 2.0 ** (1.0 / p)                  # = 2^{-log_L h_F} with h_F = L^{-1/p}
+    hk = lambda k: zeta ** (-k)
+    nk = lambda k: int(round(L * zeta ** k))
+    ceil = lambda x: int(math.ceil(x - 1e-9))   # h_k^{2p} = 4^{-k} exactly; ignore rounding noise
+    Nbc = ceil(L ** 2)
+    terms = [Term("base", 0, nk(0), 1.0, nk(0), 1.0, Nbc)]
+    for k in range(K):
+        terms.append(Term("dh", k, nk(k + 1), 4.0 ** k, nk(k), 4.0 ** k,
+                          ceil(L ** 2 * hk(k) ** (2 * p))))
+        terms.append(Term("dT", k, nk(k + 1), 4.0 ** (k + 1), nk(k + 1), 4.0 ** k,
+                          ceil(L ** 2 * hk(k + 1) ** (2 * p))))
+    return terms
+
+
+# --------------------------------------------------------------------------------------
+# One sample of one term (runs inside worker processes)
+# --------------------------------------------------------------------------------------
+_FIELDS: dict = {}
+_MESHES: dict = {}
+
+
+def _get_field(L, cfg):
+    key = (L, cfg)
+    if key not in _FIELDS:
+        _FIELDS[key] = GaussianCoefficient(L, cfg)
+    return _FIELDS[key]
+
+
+def _get_mesh(L, n, p):
+    key = (L, n, p)
+    if key not in _MESHES:
+        _MESHES[key] = QpMesh(L, n, p)
+    return _MESHES[key]
+
+
+def _solve(mesh: QpMesh, aq, Kdata, T, cfg: Config):
+    A = mesh.matrix(Kdata, T)
+    b = mesh.rhs(aq)
+    rtol = cfg.cg_c * (mesh.h / mesh.L) ** 2
+    phi, it = cg(A, b, rtol, cfg.cg_maxiter)
+    return mesh.homogenized(aq, b, phi), it, it * mesh.nnz * b.shape[1]
+
+
+def sample_term(L: int, term: Term, seed: tuple, cfg: Config):
+    """Returns (value of first evaluation, value of subtracted evaluation or None, stats)."""
+    t0 = time.process_time()
+    field = _get_field(L, cfg)
+    ghat = field.sample(np.random.default_rng(np.random.SeedSequence(seed)))
+    mf = _get_mesh(L, term.n_fine, cfg.p)
+    aq_f = mf.coef_at_quad(field, ghat)
+    Kd_f = mf.stiffness_data(aq_f)
+    a_f, it_f, w_f = _solve(mf, aq_f, Kd_f, term.T_fine, cfg)
+    a_c, it_c, w_c = None, 0, 0
+    if term.kind == "dh":
+        mc = _get_mesh(L, term.n_coarse, cfg.p)
+        aq_c = mc.coef_at_quad(field, ghat)
+        a_c, it_c, w_c = _solve(mc, aq_c, mc.stiffness_data(aq_c), term.T_coarse, cfg)
+    elif term.kind == "dT":                     # same mesh and coefficient, smaller T
+        a_c, it_c, w_c = _solve(mf, aq_f, Kd_f, term.T_coarse, cfg)
+    stats = dict(cpu=time.process_time() - t0, cg_iters=it_f + it_c, cg_work=w_f + w_c)
+    return a_f, a_c, stats
+
+
+def run_batch(args):
+    """Worker entry point: several samples of one term of one repetition."""
+    L, rep, ti, term, seeds, cfg = args
+    out = []
+    for s in seeds:
+        a_f, a_c, st = sample_term(L, term, s, cfg)
+        out.append((a_f, a_c, st, s[-1]))
+    return L, rep, ti, out
