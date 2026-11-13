@@ -1,0 +1,88 @@
+{
+ "L": 8,
+ "reps": 64,
+ "seed": 20261016,
+ "workers": 8,
+ "wall_seconds": 22.89698100090027,
+ "cfg": {
+  "p": 2,
+  "nu": 3.5,
+  "ell": 0.25,
+  "beta": 1.0,
+  "tail_tol": 1e-06,
+  "cg_c": 0.0001,
+  "cg_maxiter": 200000
+ },
+ "terms": [
+  {
+   "kind": "base",
+   "k": 0,
+   "n_fine": 8,
+   "T_fine": 1.0,
+   "n_coarse": 8,
+   "T_coarse": 1.0,
+   "N": 64,
+   "label": "base"
+  },
+  {
+   "kind": "dh",
+   "k": 0,
+   "n_fine": 11,
+   "T_fine": 1.0,
+   "n_coarse": 8,
+   "T_coarse": 1.0,
+   "N": 64,
+   "label": "\u0394h_0"
+  },
+  {
+   "kind": "dT",
+   "k": 0,
+   "n_fine": 11,
+   "T_fine": 4.0,
+   "n_coarse": 11,
+   "T_coarse": 1.0,
+   "N": 16,
+   "label": "\u0394T_0"
+  },
+  {
+   "kind": "dh",
+   "k": 1,
+   "n_fine": 16,
+   "T_fine": 4.0,
+   "n_coarse": 11,
+   "T_coarse": 4.0,
+   "N": 16,
+   "label": "\u0394h_1"
+  },
+  {
+   "kind": "dT",
+   "k": 1,
+   "n_fine": 16,
+   "T_fine": 16.0,
+   "n_coarse": 16,
+   "T_coarse": 4.0,
+   "N": 4,
+   "label": "\u0394T_1"
+  },
+  {
+   "kind": "dh",
+   "k": 2,
+   "n_fine": 23,
+   "T_fine": 16.0,
+   "n_coarse": 16,
+   "T_coarse": 16.0,
+   "N": 4,
+   "label": "\u0394h_2"
+  },
+  {
+   "kind": "dT",
+   "k": 2,
+   "n_fine": 23,
+   "T_fine": 64.0,
+   "n_coarse": 23,
+   "T_coarse": 16.0,
+   "N": 1,
+   "label": "\u0394T_2"
+  }
+ ]
+}

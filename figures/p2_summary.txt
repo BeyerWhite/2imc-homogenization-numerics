@@ -1,0 +1,21 @@
+p = 2
+   L  runs       RMSE                  90% CI    stat sd       bias       ±se  CPU s/run wall s/run    CG work
+   4   128  1.081e-01 [9.651e-02, 1.203e-01]  9.883e-02  3.509e-02  8.74e-03        0.2       0.03  1.223e+07
+   8    64  2.849e-02 [2.495e-02, 3.219e-02]  2.461e-02  1.372e-02  3.08e-03        2.5       0.36  4.438e+08
+  16    32  6.894e-03 [5.607e-03, 8.065e-03]  6.444e-03  3.975e-03  1.14e-03       55.7       7.44  1.367e+10
+  32    16  1.639e-03 [1.173e-03, 2.056e-03]  1.676e-03  9.877e-04  4.19e-04     1444.3     194.86  3.679e+11
+slopes in L: RMSE -2.02, CPU 4.35, CG work 4.96, Lemma-15 model 5.11
+mean a_MC at L=32: [[1.00073e+00 5.46487e-05]
+ [5.46487e-05 1.00066e+00]]
+levels at L=32:
+     base n=  32 T=      1 N= 1024  E=1.51e+00±3.7e-04 sd=4.78e-02  CG it=68  CPU/sample=0.040s  CPU share=0.028
+     Δh_0 n=  45 T=      1 N= 1024  E=1.03e-02±6.4e-06 sd=8.22e-04  CG it=168  CPU/sample=0.136s  CPU share=0.096
+     ΔT_0 n=  45 T=      4 N=  256  E=4.40e-02±6.0e-05 sd=3.82e-03  CG it=282  CPU/sample=0.269s  CPU share=0.048
+     Δh_1 n=  64 T=      4 N=  256  E=4.70e-03±4.7e-06 sd=3.02e-04  CG it=454  CPU/sample=0.708s  CPU share=0.125
+     ΔT_1 n=  64 T=     16 N=   64  E=2.23e-02±8.6e-05 sd=2.74e-03  CG it=717  CPU/sample=1.398s  CPU share=0.062
+     Δh_2 n=  91 T=     16 N=   64  E=1.65e-03±3.0e-06 sd=9.71e-05  CG it=1108  CPU/sample=3.586s  CPU share=0.159
+     ΔT_2 n=  91 T=     64 N=   16  E=9.00e-03±9.9e-05 sd=1.59e-03  CG it=1584  CPU/sample=6.529s  CPU share=0.072
+     Δh_3 n= 128 T=     64 N=   16  E=4.95e-04±1.7e-06 sd=2.67e-05  CG it=2184  CPU/sample=14.507s  CPU share=0.161
+     ΔT_3 n= 128 T=    256 N=    4  E=3.06e-03±1.0e-04 sd=8.28e-04  CG it=2691  CPU/sample=22.847s  CPU share=0.063
+     Δh_4 n= 181 T=    256 N=    4  E=1.44e-04±7.5e-07 sd=6.00e-06  CG it=3489  CPU/sample=48.692s  CPU share=0.135
+     ΔT_4 n= 181 T=   1024 N=    1  E=8.03e-04±6.5e-05 sd=2.59e-04  CG it=4193  CPU/sample=72.418s  CPU share=0.050

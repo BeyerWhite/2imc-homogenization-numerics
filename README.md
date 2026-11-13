@@ -79,7 +79,62 @@ k_F = 2 log₄ L is an integer. Other parameters:
 
 ## Results (final thesis)
 
-Runs with the final Eq. (11) are in progress.
+Q3 (main case) and Q2 (comparison), L = 4, 8, 16, 32 with 128, 64, 32 and 16 independent
+estimator runs. Full tables are in `figures/p{3,2}_summary.txt`; logs are in `logs/`.
+
+| | Q3 | Q2 | Thm 17 claim |
+|---|---|---|---|
+| RMS error E[\|a_MC − ā\|²]^½, slope in L | −1.99 | −2.02 | −2 (up to logs), Eq. (9) |
+| statistical part (Σ V_ℓ/N_ℓ)^½ | −1.94 | −1.96 | |
+| bias \|mean a_MC − ā\| | −1.91 | −1.72 | |
+| CG work (Σ nnz × iterations × RHS), slope | 4.83 (steps 5.29, 4.69, 4.56) | 4.96 (steps 5.18, 4.94, 4.75) | L⁴ log²L, Eq. (10) |
+| CG work / (L⁴ log²L) at L = 4, 8, 16, 32 | 1.04, 1.13, 1.03, 0.97 (×10⁵) | 2.49, 2.51, 2.71, 2.92 (×10⁴) | bounded |
+| CPU time per estimator, slope | 4.68 | 4.35 | |
+
+**Accuracy (Eq. 9) holds.** For Q3 the RMS error is 1.3e-1, 3.4e-2, 8.2e-3 and 2.2e-3,
+a slope of −1.99. The statistical part dominates, and the bias is about half of it. At L = 32
+the averaged estimate is I + 8e-4, within two standard errors of the exact answer.
+
+**Cost (Eq. 10) holds for Q3.** CG work divided by L⁴ log²L stays between 0.97 and 1.13 (×10⁵)
+across L = 4–32, and the local slopes 5.29, 4.69, 4.56 track those of L⁴ log²L
+(5.17, 4.83, 4.64). The cost model of Lemma 15 and Definition 16 gives slope 4.86.
+- No level dominates any more. At L = 32 the CPU share per term decreases slowly from the
+  coarse to the fine levels (Δh₀ 19%, Δh₁ 20%, Δh₂ 14%, Δh₃ 9%, Δh₄ 5%; the single finest ΔT
+  sample 1.6%). Under the draft's sample sizes the two finest terms took about 45%.
+- Error against CPU time goes like cost^−0.43, consistent with L⁻² against L⁴ log²L over this
+  range of L; the cost^−1/2 Monte Carlo rate is reached only up to the log² factor.
+- The CPU-time slope (last step 4.88) is noisier than the CG work, because the machine was
+  heavily loaded by other programs during the L = 32 run (load average ≈ 550 on 8 cores).
+  The CG-work column does not depend on the machine.
+- Compared with the draft's sample sizes, one Q3 estimator at L = 32 is about 5.5× cheaper
+  in CG work.
+
+**Q2 (outside Theorem 17).** The error still decays like L⁻². The CG work divided by
+L⁴ log²L creeps up by 17% from L = 4 to 32, consistent with the expected L^4.5 log L growth
+when p < d + 1, but at L ≤ 32 the two rates cannot be told apart clearly.
+
+**Level statistics (Q3, L = 32, `figures/p3_level_stats.png`).**
+- std(Δh_k) decays like 2^(−1.61k), faster than the h_k^p = 2^(−k) bound of Lemma 18.3.
+- std(ΔT_k) decays like 2^(−1.01k), matching T_k^(−1/2) + h_(k+1)^p ∼ 2^(−k) of Lemma 18.4.
+
+### Corrector convergence along the (T, h) path (Q3)
+
+`figures/corrector_convergence_p3.png` uses Q3, the estimator's CG solver and tolerance, and
+L = 4, 8, 16, 32 with 8, 8, 8 and 4 realisations. Each realisation follows
+(1, 1) → (1, h₁) → (4, h₁) → … → (L², h_F) and then two more levels, whose last state is the
+reference φ_*. Correctors are compared in the energy norm (L⁻² ∫ Σᵢ |∇uᵢ|²)^½.
+
+- **Δh updates do not depend on L.** The curves for all L coincide. They shrink by 1.5×, 1.7×,
+  1.7×, 1.9×, 1.9×, 1.9× per level, approaching the ×2 of h^p = 2^(−k) only on the finer meshes.
+- **ΔT updates depend on L.** They decay at about the T^(−1/2) rate (×2 per level) while T is
+  small compared with L², then steepen towards ×4 per level (like L²/T) once the Poincaré
+  constant of the torus takes over from the massive term.
+- **At the thesis endpoint** (T = L², h = h_F), for L = 4, 8, 16, 32:
+  - ‖∇(φ − φ_*)‖ = 3.4e-2, 1.4e-2, 7.8e-3, 4.0e-3, about L^(−1.0), matching the h_F^p = L⁻¹
+    energy error;
+  - |a − a_*| = 4.6e-3, 2.5e-3, 1.1e-3, 3.2e-4, about L^(−1.3).
+
+  Both are lower bounds on the true error, since φ_* is only two levels further along.
 
 ## Earlier runs (draft thesis, superseded)
 
