@@ -1,0 +1,11 @@
+config: Config(p=3, nu=4.5, ell=0.25, beta=1.0, tail_tol=1e-06, cg_c=0.0001, cg_maxiter=200000, element='P', kmax=inf)
+  17/3104 solves, 69s elapsed
+  54/3104 solves, 129s elapsed
+  81/3104 solves, 208s elapsed
+  145/3104 solves, 269s elapsed
+  169/3104 solves, 333s elapsed
+  187/3104 solves, 394s elapsed
+  241/3104 solves, 463s elapsed
+  361/3104 solves, 524s elapsed
+  529/3104 solves, 588s elapsed
+wrote /Users/beyer_white/Desktop/LocalCodeRepository/2imc-numerics/results/baselines_tri_p3.npz  (637s wall, 4802s CPU)

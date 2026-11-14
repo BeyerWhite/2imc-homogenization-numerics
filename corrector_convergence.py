@@ -11,9 +11,11 @@ correctors are compared in the scaled energy norm
     || grad u ||  :=  ( L^{-2} int_U sum_{i=1,2} |grad u_i|^2 )^{1/2}
 
 on the quadrature points of the reference mesh, together with the coefficient a^{L,T,h}.
-Same field, Q_p FEM and CG solver (and tolerance) as the estimator in twoimc.py.
+Same field, FEM (P_p triangles with --element P, Q_p quadrilaterals with Q) and CG solver (and tolerance) as the estimator in twoimc.py.
 
-    python corrector_convergence.py --L 4 8 16 32 --reals 8 8 8 4
+    python corrector_convergence.py --element P --p 3 --L 4 8 16 32 --reals 8 8 8 4 --extra 2
+
+writes results/corrector_tri_p{p}.json (P) or results/corrector_p{p}.json (Q).
 """
 import os
 
@@ -29,7 +31,7 @@ from dataclasses import replace
 
 import numpy as np
 
-from twoimc import Config, GaussianCoefficient, QpMesh, cg
+from twoimc import Config, GaussianCoefficient, cg, make_mesh
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -47,7 +49,7 @@ def path(L, p, extra):
 
 
 def solve(L, n, T, field, ghat, cfg):
-    m = QpMesh(L, n, cfg.p)
+    m = make_mesh(L, n, cfg.p, cfg.element)
     aq = m.coef_at_quad(field, ghat)
     A = m.matrix(m.stiffness_data(aq), T)
     b = m.rhs(aq)
@@ -98,11 +100,12 @@ def main():
     ap.add_argument("--seed", type=int, default=20261020)
     ap.add_argument("--workers", type=int, default=os.cpu_count())
     ap.add_argument("--out", default=None)
+    ap.add_argument("--element", choices=["P", "Q"], default="Q")
     args = ap.parse_args()
-    cfg = replace(Config(), p=args.p, nu=args.p + 1.5)
+    cfg = replace(Config(), p=args.p, nu=args.p + 1.5, element=args.element)
     if args.cg_c is not None:
         cfg = replace(cfg, cg_c=args.cg_c)
-    out = args.out or os.path.join(HERE, "results", f"corrector_p{args.p}.json")
+    out = args.out or os.path.join(HERE, "results", ("corrector_tri_p" if args.element == "P" else "corrector_p") + f"{args.p}.json")
     tasks = [(L, r, cfg, args.extra, args.seed) for L, R in zip(args.L, args.reals) for r in range(R)]
     tasks.sort(key=lambda t: -t[0])                       # largest L first
     res = {}

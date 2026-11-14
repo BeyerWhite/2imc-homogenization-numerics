@@ -1,0 +1,23 @@
+config: Config(p=3, nu=4.5, ell=0.125, beta=1.0, tail_tol=1e-06, cg_c=0.0001, cg_maxiter=200000, element='P', kmax=inf) variant: _ell0.125
+L=4: 5 terms, samples/rep=41, reps=128, tasks left=5248
+L=4: done in 6.4s wall, 43.0s CPU (0.3s CPU per estimator)
+L=8: 7 terms, samples/rep=169, reps=64, tasks left=4672
+  L=8: 2876/4672 tasks, 30s elapsed
+L=8: done in 47.3s wall, 354.5s CPU (5.5s CPU per estimator)
+L=16: 9 terms, samples/rep=681, reps=32, tasks left=3360
+  L=16: 77/3360 tasks, 30s elapsed
+  L=16: 175/3360 tasks, 60s elapsed
+  L=16: 347/3360 tasks, 90s elapsed
+  L=16: 577/3360 tasks, 120s elapsed
+  L=16: 816/3360 tasks, 150s elapsed
+  L=16: 1248/3360 tasks, 180s elapsed
+  L=16: 1457/3360 tasks, 211s elapsed
+  L=16: 1632/3360 tasks, 241s elapsed
+  L=16: 1802/3360 tasks, 271s elapsed
+  L=16: 2106/3360 tasks, 302s elapsed
+  L=16: 2369/3360 tasks, 332s elapsed
+  L=16: 2504/3360 tasks, 362s elapsed
+  L=16: 2637/3360 tasks, 392s elapsed
+  L=16: 2771/3360 tasks, 423s elapsed
+  L=16: 3011/3360 tasks, 453s elapsed
+L=16: done in 481.0s wall, 3609.9s CPU (112.8s CPU per estimator)

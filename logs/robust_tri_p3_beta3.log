@@ -1,0 +1,53 @@
+config: Config(p=3, nu=4.5, ell=0.25, beta=3.0, tail_tol=1e-06, cg_c=0.0001, cg_maxiter=200000, element='P', kmax=inf) variant: _beta3
+L=4: 5 terms, samples/rep=41, reps=128, tasks left=5248
+L=4: done in 10.4s wall, 73.7s CPU (0.6s CPU per estimator)
+L=8: 7 terms, samples/rep=169, reps=64, tasks left=4672
+  L=8: 499/4672 tasks, 30s elapsed
+  L=8: 1756/4672 tasks, 60s elapsed
+  L=8: 3247/4672 tasks, 90s elapsed
+L=8: done in 113.6s wall, 851.2s CPU (13.3s CPU per estimator)
+L=16: 9 terms, samples/rep=681, reps=32, tasks left=3360
+  L=16: 20/3360 tasks, 30s elapsed
+  L=16: 48/3360 tasks, 62s elapsed
+  L=16: 80/3360 tasks, 95s elapsed
+  L=16: 112/3360 tasks, 127s elapsed
+  L=16: 143/3360 tasks, 158s elapsed
+  L=16: 185/3360 tasks, 188s elapsed
+  L=16: 234/3360 tasks, 218s elapsed
+  L=16: 282/3360 tasks, 248s elapsed
+  L=16: 356/3360 tasks, 278s elapsed
+  L=16: 433/3360 tasks, 309s elapsed
+  L=16: 510/3360 tasks, 339s elapsed
+  L=16: 585/3360 tasks, 369s elapsed
+  L=16: 661/3360 tasks, 399s elapsed
+  L=16: 737/3360 tasks, 430s elapsed
+  L=16: 829/3360 tasks, 460s elapsed
+  L=16: 975/3360 tasks, 490s elapsed
+  L=16: 1122/3360 tasks, 520s elapsed
+  L=16: 1268/3360 tasks, 550s elapsed
+  L=16: 1353/3360 tasks, 582s elapsed
+  L=16: 1417/3360 tasks, 613s elapsed
+  L=16: 1481/3360 tasks, 644s elapsed
+  L=16: 1545/3360 tasks, 675s elapsed
+  L=16: 1609/3360 tasks, 706s elapsed
+  L=16: 1673/3360 tasks, 738s elapsed
+  L=16: 1737/3360 tasks, 769s elapsed
+  L=16: 1801/3360 tasks, 800s elapsed
+  L=16: 1905/3360 tasks, 831s elapsed
+  L=16: 2022/3360 tasks, 861s elapsed
+  L=16: 2142/3360 tasks, 891s elapsed
+  L=16: 2262/3360 tasks, 921s elapsed
+  L=16: 2353/3360 tasks, 952s elapsed
+  L=16: 2409/3360 tasks, 984s elapsed
+  L=16: 2465/3360 tasks, 1015s elapsed
+  L=16: 2521/3360 tasks, 1047s elapsed
+  L=16: 2577/3360 tasks, 1078s elapsed
+  L=16: 2633/3360 tasks, 1110s elapsed
+  L=16: 2688/3360 tasks, 1140s elapsed
+  L=16: 2741/3360 tasks, 1170s elapsed
+  L=16: 2793/3360 tasks, 1200s elapsed
+  L=16: 2852/3360 tasks, 1230s elapsed
+  L=16: 3011/3360 tasks, 1261s elapsed
+  L=16: 3169/3360 tasks, 1291s elapsed
+  L=16: 3325/3360 tasks, 1321s elapsed
+L=16: done in 1327.4s wall, 9998.1s CPU (312.4s CPU per estimator)

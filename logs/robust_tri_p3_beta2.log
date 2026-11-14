@@ -1,0 +1,36 @@
+config: Config(p=3, nu=4.5, ell=0.25, beta=2.0, tail_tol=1e-06, cg_c=0.0001, cg_maxiter=200000, element='P', kmax=inf) variant: _beta2
+L=4: 5 terms, samples/rep=41, reps=128, tasks left=5248
+L=4: done in 7.8s wall, 56.1s CPU (0.4s CPU per estimator)
+L=8: 7 terms, samples/rep=169, reps=64, tasks left=4672
+  L=8: 1216/4672 tasks, 30s elapsed
+  L=8: 3405/4672 tasks, 60s elapsed
+L=8: done in 72.6s wall, 541.1s CPU (8.5s CPU per estimator)
+L=16: 9 terms, samples/rep=681, reps=32, tasks left=3360
+  L=16: 41/3360 tasks, 31s elapsed
+  L=16: 96/3360 tasks, 61s elapsed
+  L=16: 151/3360 tasks, 92s elapsed
+  L=16: 232/3360 tasks, 122s elapsed
+  L=16: 341/3360 tasks, 152s elapsed
+  L=16: 474/3360 tasks, 182s elapsed
+  L=16: 609/3360 tasks, 212s elapsed
+  L=16: 745/3360 tasks, 243s elapsed
+  L=16: 952/3360 tasks, 273s elapsed
+  L=16: 1205/3360 tasks, 303s elapsed
+  L=16: 1369/3360 tasks, 334s elapsed
+  L=16: 1474/3360 tasks, 364s elapsed
+  L=16: 1581/3360 tasks, 394s elapsed
+  L=16: 1664/3360 tasks, 424s elapsed
+  L=16: 1759/3360 tasks, 454s elapsed
+  L=16: 1871/3360 tasks, 485s elapsed
+  L=16: 2045/3360 tasks, 515s elapsed
+  L=16: 2222/3360 tasks, 545s elapsed
+  L=16: 2361/3360 tasks, 576s elapsed
+  L=16: 2440/3360 tasks, 607s elapsed
+  L=16: 2517/3360 tasks, 637s elapsed
+  L=16: 2593/3360 tasks, 667s elapsed
+  L=16: 2673/3360 tasks, 697s elapsed
+  L=16: 2753/3360 tasks, 728s elapsed
+  L=16: 2833/3360 tasks, 759s elapsed
+  L=16: 3024/3360 tasks, 789s elapsed
+  L=16: 3266/3360 tasks, 819s elapsed
+L=16: done in 830.3s wall, 6118.6s CPU (191.2s CPU per estimator)

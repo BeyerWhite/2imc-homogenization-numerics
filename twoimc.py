@@ -7,10 +7,13 @@ Coefficients of Linear Elliptic Problems" (ISTA MSc thesis, 2026):
                         g a centred, stationary, smooth Gaussian field on the torus
                         U_L = [0, L)^2 (Definition 12, "tame Gaussian coefficients");
   * full corrector      phi in V_h:  int a (e_i + grad phi).grad eta + (1/T) phi eta = 0
-                        (Definition 9), V_h = periodic Q_p Lagrange elements on a uniform
-                        n x n quadrilateral mesh, standard nodal basis;
+                        (Definition 9), V_h = periodic Lagrange elements with the standard
+                        nodal basis on a uniform n x n mesh: either P_p on triangles (each
+                        square split along its (1,1) diagonal; the elements the thesis
+                        analyses, Config.element = "P") or Q_p on quadrilaterals ("Q");
   * coefficient         a^{L,T,h} e_i = L^{-2} int_U a (e_i + grad phi_i)   (Definition 10.3),
-                        evaluated with tensor Gauss-Legendre quadrature, (p+1)^2 points/cell;
+                        evaluated with Gauss quadrature exact for degree 2p+1 ((p+1)^2
+                        points per quadrilateral or per triangle);
   * estimator           a_MC of Definition 13 / Eq. (5) with sample sizes of Eq. (11);
   * linear solver       unpreconditioned conjugate gradients (as assumed in Lemma 15).
 
@@ -43,6 +46,8 @@ class Config:
     tail_tol: float = 1e-6     # discarded fraction of the field variance (Fourier cut-off)
     cg_c: float = 1e-4         # CG relative tolerance = cg_c * (h/L)^d   (Lemma 15: eps ~ (h/L)^d)
     cg_maxiter: int = 200_000
+    element: str = "Q"         # "P": P_p Lagrange on triangles;  "Q": Q_p Lagrange on quadrilaterals
+    kmax: float = math.inf     # optional absolute Fourier cut-off (used only for rough fields, small nu)
 
     def to_dict(self):
         return asdict(self)
@@ -66,7 +71,7 @@ class GaussianCoefficient:
 
     def __init__(self, L: float, cfg: Config):
         self.L, self.cfg = L, cfg
-        kcut = cfg.tail_tol ** (-1.0 / (2 * cfg.nu)) / cfg.ell
+        kcut = min(cfg.tail_tol ** (-1.0 / (2 * cfg.nu)) / cfg.ell, cfg.kmax)
         mmax = int(math.ceil(kcut * L / (2 * math.pi)))
         self.Mg = Mg = 2 * mmax + 1                       # odd => exact Hermitian symmetry
         self.m = np.fft.fftfreq(Mg, 1.0 / Mg).round().astype(np.int64)
@@ -109,6 +114,21 @@ class GaussianCoefficient:
             for qy, sy in enumerate(shifts):
                 C = (self._fold(n, sy) @ B.T).T                # (n, n)
                 out[:, qx, :, qy] = (np.fft.ifft2(C) * (n * n)).real
+        return out
+
+    def g_at_offsets(self, ghat: np.ndarray, n: int, offsets: np.ndarray) -> np.ndarray:
+        """g at x = (L/n)(i + s_1, j + s_2) for every cell (i, j) and every offset (s_1, s_2).
+
+        Same exact folding/FFT evaluation as g_on_grid, for offsets that are not a tensor
+        grid (triangle quadrature). Returns shape (n, n, len(offsets)) indexed [ix, iy, q].
+        """
+        out = np.empty((n, n, len(offsets)))
+        sx_unique = np.unique(offsets[:, 0])
+        for sx in sx_unique:
+            B = self._fold(n, float(sx)) @ ghat                # (n, Mg)
+            for q in np.nonzero(offsets[:, 0] == sx)[0]:
+                C = (self._fold(n, float(offsets[q, 1])) @ B.T).T
+                out[:, :, q] = (np.fft.ifft2(C) * (n * n)).real
         return out
 
     def coefficient(self, g: np.ndarray) -> np.ndarray:
@@ -228,6 +248,161 @@ class QpMesh:
 
 
 # --------------------------------------------------------------------------------------
+# Periodic P_p finite elements on a uniform triangulation (each square split in two)
+# --------------------------------------------------------------------------------------
+def triangle_rule(m: int):
+    """Collapsed Gauss rule with m^2 points on the reference triangle {xi, eta >= 0, xi + eta <= 1},
+    exact for polynomials of total degree 2m - 1 (Gauss-Jacobi(1, 0) in eta, Gauss-Legendre in t,
+    xi = t (1 - eta)). Returns xi, eta, w with sum(w) = 1/2."""
+    from scipy.special import roots_jacobi
+    xs, ws = roots_jacobi(m, 1.0, 0.0)
+    eta, weta = 0.5 * (xs + 1.0), ws / 4.0
+    xt, wt = leggauss(m)
+    t, wt = 0.5 * (xt + 1.0), 0.5 * wt
+    E, Tt = np.meshgrid(eta, t, indexing="ij")
+    W = np.outer(weta, wt)
+    return (Tt * (1.0 - E)).ravel(), E.ravel(), W.ravel()
+
+
+def _monomials(p):
+    return [(i, j) for i in range(p + 1) for j in range(p + 1 - i)]
+
+
+def _mono_eval(p, x, y):
+    """Values and x-, y-derivatives of the monomials x^i y^j (i + j <= p) at points; each (P, nmono)."""
+    mons = _monomials(p)
+    V = np.stack([x ** i * y ** j for i, j in mons], axis=1)
+    Dx = np.stack([i * x ** max(i - 1, 0) * y ** j for i, j in mons], axis=1)
+    Dy = np.stack([j * x ** i * y ** max(j - 1, 0) for i, j in mons], axis=1)
+    return V, Dx, Dy
+
+
+class PpMesh:
+    """P_p Lagrange space on the periodic triangulation of [0, L)^2 (h = L / n).
+
+    Each of the n x n squares is split along its (1, 1) diagonal into a lower triangle
+    (type 0: y <= x in cell coordinates) and an upper triangle (type 1: y >= x). The
+    equispaced Lagrange nodes of both triangles together are the (p+1)^2 lattice points of the
+    square, so the DOFs are again the periodic (n p) x (n p) lattice: Ndof = (n p)^2.
+    Quadrature: collapsed Gauss rule with (p+1)^2 points per triangle, exact for degree 2p+1.
+    Elements are ordered e = type * n^2 + ex * n + ey; arrays over quadrature points have
+    shape (2 n^2, (p+1)^2) in that order.
+    """
+
+    def __init__(self, L: float, n: int, p: int):
+        self.L, self.n, self.p = L, n, p
+        self.h = h = L / n
+        self.Np = Np = n * p
+        self.Ndof = Np * Np
+        m = p + 1
+        xi, eta, w = triangle_rule(m)
+        self.w2 = w                                         # same weights for both types (|det J| = 1)
+        self.nq = nq = len(w)
+        mons = _monomials(p)
+        self.nloc = nloc = len(mons)
+        self.types = []
+        offsets = []
+        for typ in (0, 1):
+            nodes = [(a, b) for a in range(p + 1) for b in range(p + 1) if (b <= a if typ == 0 else b >= a)]
+            V, _, _ = _mono_eval(p, np.array([a for a, _ in nodes], float) / p,
+                                 np.array([b for _, b in nodes], float) / p)
+            C = np.linalg.inv(V)                              # (nmono, nloc): basis = mono @ C
+            # reference triangle -> cell coordinates (|det| = 1)
+            x, y = (xi + eta, eta) if typ == 0 else (xi, xi + eta)
+            Vq, Dxq, Dyq = _mono_eval(p, x, y)
+            N, Gx, Gy = Vq @ C, Dxq @ C, Dyq @ C              # (nq, nloc), cell-coordinate derivatives
+            Kker = (w[:, None, None] * (Gx[:, :, None] * Gx[:, None, :]
+                                        + Gy[:, :, None] * Gy[:, None, :])).reshape(nq, nloc * nloc)
+            Mloc = h * h * np.einsum("q,qa,qb->ab", w, N, N)
+            Rker = [-h * w[:, None] * Gx, -h * w[:, None] * Gy]
+            e = np.arange(n)
+            gx = (e[:, None, None] * p + np.array([a for a, _ in nodes])[None, None, :]) % Np
+            gy = (e[None, :, None] * p + np.array([b for _, b in nodes])[None, None, :]) % Np
+            conn = (gx * Np + gy).reshape(n * n, nloc)       # cell (ex, ey) -> row ex * n + ey
+            self.types.append(dict(C=C, Kker=Kker, Mloc=Mloc, Rker=Rker, conn=conn))
+            offsets.append(np.stack([x, y], axis=1))
+        self.offsets = np.concatenate(offsets)               # (2 nq, 2), type-major
+        self.conn = np.concatenate([t["conn"] for t in self.types])
+        rows = np.repeat(self.conn, nloc, axis=1).ravel()
+        cols = np.tile(self.conn, (1, nloc)).ravel()
+        keys = rows.astype(np.int64) * self.Ndof + cols
+        ukeys, inv = np.unique(keys, return_inverse=True)
+        self.scatter = inv.astype(np.int32)
+        self.nnz = len(ukeys)
+        urows = (ukeys // self.Ndof).astype(np.int64)
+        self.indices = (ukeys % self.Ndof).astype(np.int32)
+        self.indptr = np.concatenate([[0], np.cumsum(np.bincount(urows, minlength=self.Ndof))]).astype(np.int32)
+        Mel = np.concatenate([np.tile(t["Mloc"].ravel(), n * n) for t in self.types])
+        self.Mdata = np.bincount(self.scatter, weights=Mel, minlength=self.nnz)
+
+    def coef_at_quad(self, field: GaussianCoefficient, ghat: np.ndarray) -> np.ndarray:
+        """a at the quadrature points, shape (2 n^2, nq)."""
+        n, nq = self.n, self.nq
+        g = field.g_at_offsets(ghat, n, self.offsets)        # (ex, ey, 2 nq)
+        a = field.coefficient(g).reshape(n * n, 2, nq).transpose(1, 0, 2)
+        return np.ascontiguousarray(a).reshape(2 * n * n, nq)
+
+    def _split(self, aq):
+        nn = self.n * self.n
+        return aq[:nn], aq[nn:]
+
+    def stiffness_data(self, aq: np.ndarray) -> np.ndarray:
+        loc = np.concatenate([a @ t["Kker"] for a, t in zip(self._split(aq), self.types)])
+        return np.bincount(self.scatter, weights=loc.ravel(), minlength=self.nnz)
+
+    def matrix(self, Kdata: np.ndarray, T: float) -> sp.csr_matrix:
+        return sp.csr_matrix((Kdata + self.Mdata / T, self.indices, self.indptr),
+                             shape=(self.Ndof, self.Ndof))
+
+    def rhs(self, aq: np.ndarray) -> np.ndarray:
+        cols = []
+        for i in range(2):
+            loc = np.concatenate([a @ t["Rker"][i] for a, t in zip(self._split(aq), self.types)])
+            cols.append(np.bincount(self.conn.ravel(), weights=loc.ravel(), minlength=self.Ndof))
+        return np.stack(cols, axis=1)
+
+    def homogenized(self, aq: np.ndarray, b: np.ndarray, phi: np.ndarray) -> np.ndarray:
+        mean_a = self.h * self.h * float((aq * self.w2).sum())
+        return (mean_a * np.eye(2) - b.T @ phi) / self.L ** 2
+
+    def quad_points(self):
+        n, h = self.n, self.h
+        ex, ey = np.meshgrid(np.arange(n), np.arange(n), indexing="ij")
+        X1, X2 = [], []
+        for typ in (0, 1):
+            off = self.offsets[typ * self.nq:(typ + 1) * self.nq]
+            X1.append((h * (ex.reshape(-1, 1) + off[None, :, 0])).ravel())
+            X2.append((h * (ey.reshape(-1, 1) + off[None, :, 1])).ravel())
+        W = np.broadcast_to(h * h * self.w2, (2 * n * n, self.nq)).ravel()
+        return np.concatenate(X1), np.concatenate(X2), W
+
+    def eval_grad(self, phi: np.ndarray, x1: np.ndarray, x2: np.ndarray, chunk: int = 200_000):
+        """Gradients of the FE functions phi (Ndof, m) at arbitrary points; returns (P, m, 2)."""
+        p, n, h = self.p, self.n, self.h
+        out = np.empty((len(x1), phi.shape[1], 2))
+        for s in range(0, len(x1), chunk):
+            u, v = x1[s:s + chunk] / h, x2[s:s + chunk] / h
+            ex, ey = np.floor(u), np.floor(v)
+            fx, fy = u - ex, v - ey
+            cell = (ex.astype(np.int64) % n) * n + (ey.astype(np.int64) % n)
+            _, Dx, Dy = _mono_eval(p, fx, fy)
+            typ = (fy > fx).astype(np.int64)
+            for t in (0, 1):
+                sel = np.nonzero(typ == t)[0]
+                if len(sel) == 0:
+                    continue
+                C, conn = self.types[t]["C"], self.types[t]["conn"]
+                coef = phi[conn[cell[sel]]]                                  # (P, nloc, m)
+                out[s + sel, :, 0] = np.einsum("Pa,Pam->Pm", Dx[sel] @ C, coef) / h
+                out[s + sel, :, 1] = np.einsum("Pa,Pam->Pm", Dy[sel] @ C, coef) / h
+        return out
+
+
+def make_mesh(L: float, n: int, p: int, element: str = "Q"):
+    return PpMesh(L, n, p) if element == "P" else QpMesh(L, n, p)
+
+
+# --------------------------------------------------------------------------------------
 # Conjugate gradients, several right-hand sides at once (independent CG per column)
 # --------------------------------------------------------------------------------------
 def cg(A: sp.csr_matrix, B: np.ndarray, rtol: float, maxiter: int):
@@ -312,10 +487,10 @@ def _get_field(L, cfg):
     return _FIELDS[key]
 
 
-def _get_mesh(L, n, p):
-    key = (L, n, p)
+def _get_mesh(L, n, p, element="Q"):
+    key = (L, n, p, element)
     if key not in _MESHES:
-        _MESHES[key] = QpMesh(L, n, p)
+        _MESHES[key] = make_mesh(L, n, p, element)
     return _MESHES[key]
 
 
@@ -332,13 +507,13 @@ def sample_term(L: int, term: Term, seed: tuple, cfg: Config):
     t0 = time.process_time()
     field = _get_field(L, cfg)
     ghat = field.sample(np.random.default_rng(np.random.SeedSequence(seed)))
-    mf = _get_mesh(L, term.n_fine, cfg.p)
+    mf = _get_mesh(L, term.n_fine, cfg.p, cfg.element)
     aq_f = mf.coef_at_quad(field, ghat)
     Kd_f = mf.stiffness_data(aq_f)
     a_f, it_f, w_f = _solve(mf, aq_f, Kd_f, term.T_fine, cfg)
     a_c, it_c, w_c = None, 0, 0
     if term.kind == "dh":
-        mc = _get_mesh(L, term.n_coarse, cfg.p)
+        mc = _get_mesh(L, term.n_coarse, cfg.p, cfg.element)
         aq_c = mc.coef_at_quad(field, ghat)
         a_c, it_c, w_c = _solve(mc, aq_c, mc.stiffness_data(aq_c), term.T_coarse, cfg)
     elif term.kind == "dT":                     # same mesh and coefficient, smaller T

@@ -1,0 +1,17 @@
+Corrector convergence, P3 triangles, reference = 2 levels past T = L^2, h = h_F
+L=  4 (8 realisations, 0s CPU each):  |grad phi| = 0.590
+      at thesis endpoint: ||grad(phi - phi_*)|| = 3.90e-02,  |a - a_*| = 4.94e-03
+      dh updates: 7.28e-02  5.28e-02  3.71e-02  1.96e-02
+      dT updates: 9.71e-02  3.37e-02  9.30e-03  2.39e-03
+L=  8 (8 realisations, 2s CPU each):  |grad phi| = 0.607
+      at thesis endpoint: ||grad(phi - phi_*)|| = 1.85e-02,  |a - a_*| = 2.54e-03
+      dh updates: 6.89e-02  4.70e-02  2.82e-02  1.76e-02  1.03e-02
+      dT updates: 1.37e-01  7.22e-02  2.44e-02  6.68e-03  1.71e-03
+L= 16 (8 realisations, 29s CPU each):  |grad phi| = 0.636
+      at thesis endpoint: ||grad(phi - phi_*)|| = 1.08e-02,  |a - a_*| = 1.11e-03
+      dh updates: 7.12e-02  4.96e-02  3.20e-02  1.83e-02  1.05e-02  5.73e-03
+      dT updates: 1.40e-01  9.36e-02  4.37e-02  1.41e-02  3.80e-03  9.68e-04
+L= 32 (4 realisations, 374s CPU each):  |grad phi| = 0.639
+      at thesis endpoint: ||grad(phi - phi_*)|| = 5.67e-03,  |a - a_*| = 3.32e-04
+      dh updates: 7.14e-02  5.03e-02  3.07e-02  1.86e-02  1.04e-02  5.73e-03  3.06e-03
+      dT updates: 1.40e-01  9.42e-02  4.96e-02  2.02e-02  6.23e-03  1.66e-03  4.23e-04

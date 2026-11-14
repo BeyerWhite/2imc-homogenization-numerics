@@ -1,9 +1,13 @@
 """Run R independent copies of the 2IMC estimator for each box size L.
 
 Example:
-    python run_experiments.py --p 3 --L 4 8 16 32 --reps 128 64 32 16
+    python run_experiments.py --element P --p 3 --L 4 8 16 32 --reps 128 64 32 16
 
-Each (L, p) writes results/p{p}_L{L}.npz with every sample's value and cost, plus a JSON
+--element P (P_p on triangles) writes results/tri_p{p}_L{L}.*, --element Q (Q_p on
+quadrilaterals, the default for backward compatibility) writes results/p{p}_L{L}.*.
+Robustness variants (--beta, --ell, --nu, --kmax) add a suffix, e.g. tri_p3_beta2_L16.
+
+Each (L, p) writes results/<tag>.npz with every sample's value and cost, plus a JSON
 sidecar with the level hierarchy, configuration and wall-clock time. Progress is
 checkpointed to results/p{p}_L{L}.partial.npz every few minutes; rerunning the same command
 resumes from it, and an (L, p) whose final .json already exists is skipped.
@@ -30,8 +34,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CHECKPOINT_SECONDS = 300
 
 
-def run_L(L, reps, cfg, pool, workers, seed, outdir):
-    tag = f"p{cfg.p}_L{L}"
+def file_tag(cfg, L, variant=""):
+    return ("tri_" if cfg.element == "P" else "") + f"p{cfg.p}{variant}_L{L}"
+
+
+def run_L(L, reps, cfg, pool, workers, seed, outdir, variant=""):
+    tag = file_tag(cfg, L, variant)
     if os.path.exists(os.path.join(outdir, tag + ".json")):
         print(f"L={L}: results/{tag}.json exists, skipping", flush=True)
         return
@@ -117,14 +125,25 @@ def main():
     ap.add_argument("--workers", type=int, default=os.cpu_count())
     ap.add_argument("--seed", type=int, default=20261016)
     ap.add_argument("--out", default=os.path.join(HERE, "results"))
+    ap.add_argument("--element", choices=["P", "Q"], default="Q")
+    ap.add_argument("--beta", type=float, default=None, help="contrast (default 1)")
+    ap.add_argument("--ell", type=float, default=None, help="Matern length (default 0.25)")
+    ap.add_argument("--nu", type=float, default=None, help="Matern smoothness (default p + 1.5)")
+    ap.add_argument("--kmax", type=float, default=None, help="absolute Fourier cut-off (rough fields)")
     args = ap.parse_args()
     assert len(args.L) == len(args.reps)
     os.makedirs(args.out, exist_ok=True)
-    cfg = replace(Config(), p=args.p, nu=args.p + 1.5)    # Def. 12 needs nu > p + 1
-    print("config:", cfg, flush=True)
+    cfg = replace(Config(), p=args.p, nu=args.p + 1.5, element=args.element)    # Def. 12 needs nu > p + 1
+    variant = ""
+    for name in ("beta", "ell", "nu", "kmax"):
+        v = getattr(args, name)
+        if v is not None:
+            cfg = replace(cfg, **{name: v})
+            variant += f"_{name}{v:g}"
+    print("config:", cfg, "variant:", variant or "(baseline)", flush=True)
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
         for L, R in zip(args.L, args.reps):
-            run_L(L, R, cfg, pool, args.workers, args.seed, args.out)
+            run_L(L, R, cfg, pool, args.workers, args.seed, args.out, variant)
 
 
 if __name__ == "__main__":

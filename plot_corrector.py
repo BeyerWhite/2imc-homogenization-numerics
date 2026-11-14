@@ -1,4 +1,8 @@
-"""Figure for corrector_convergence.py:  python plot_corrector.py [--p 2]"""
+"""Figure for corrector_convergence.py.
+
+    python plot_corrector.py --element P --p 3   # results/corrector_tri_p3.json -> figures/corrector_convergence_tri_p3.*
+    python plot_corrector.py --element Q --p 3   # results/corrector_p3.json     -> figures/corrector_convergence_p3.*
+"""
 import argparse
 import json
 import math
@@ -32,9 +36,12 @@ def rms(x):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--p", type=int, default=2)
-    ap.add_argument("--file", default=None, help="results JSON (default results/corrector_p{p}.json)")
+    ap.add_argument("--file", default=None, help="results JSON (default from --element and --p)")
+    ap.add_argument("--element", choices=["P", "Q"], default="P")
     args = ap.parse_args()
-    data = json.load(open(args.file or os.path.join(RES, f"corrector_p{args.p}.json")))
+    tag = ("tri_p" if args.element == "P" else "p") + str(args.p)
+    el = f"P{args.p} triangles" if args.element == "P" else f"Q{args.p} elements"
+    data = json.load(open(args.file or os.path.join(RES, f"corrector_{tag}.json")))
     agg = aggregate(data["results"])
     p, extra = args.p, data["extra"]
 
@@ -91,16 +98,16 @@ def main():
         ax.set_ylabel(ylab)
         ax.set_title(title)
         ax.legend(fontsize=8, loc="lower left")
-    fig.suptitle(f"Convergence of the full corrector along the alternating (T, h) path, Q{p} elements, same CG solver",
+    fig.suptitle(f"Convergence of the full corrector along the alternating (T, h) path, {el}, same CG solver",
                  fontsize=12, fontweight="bold")
     fig.text(0.5, 0.945, f"Lines: RMS over realisations; bands: min–max.  Reference $\\varphi_*$: path continued {extra} levels "
              f"past the thesis endpoint (hollow markers: beyond the endpoint).  Norm: "
              r"$\|\nabla u\|^2 = L^{-2}\int_U \sum_i |\nabla u_i|^2$.", ha="center", fontsize=9, color=INK2)
     fig.tight_layout(rect=(0, 0, 1, 0.935))
     os.makedirs(OUT, exist_ok=True)
-    fig.savefig(os.path.join(OUT, f"corrector_convergence_p{p}.png"), dpi=150)
+    fig.savefig(os.path.join(OUT, f"corrector_convergence_{tag}.png"), dpi=150)
 
-    lines = [f"Corrector convergence, Q{p}, reference = {extra} levels past T = L^2, h = h_F"]
+    lines = [f"Corrector convergence, {el}, reference = {extra} levels past T = L^2, h = h_F"]
     for L, a in agg.items():
         jF = 2 * a["K"]
         lines.append(f"L={L:>3} ({a['R']} realisations, {a['cpu']:.0f}s CPU each):  |grad phi| = {rms(a['size'])[-1]:.3f}")
@@ -110,7 +117,7 @@ def main():
             lines.append(f"      {kind} updates: " + "  ".join(f"{v:.2e}" for v in rms(a["cauchy"][:, sel])))
     txt = "\n".join(lines)
     print(txt)
-    open(os.path.join(OUT, f"corrector_convergence_p{p}.txt"), "w").write(txt + "\n")
+    open(os.path.join(OUT, f"corrector_convergence_{tag}.txt"), "w").write(txt + "\n")
 
 
 if __name__ == "__main__":
