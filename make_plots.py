@@ -14,6 +14,8 @@ import re
 
 import numpy as np
 
+from twoimc import Config, reference_abar
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 RES = os.path.join(HERE, "results")
 OUT = os.path.join(HERE, "figures")
@@ -47,7 +49,7 @@ def load(tag):
 
 def analyse(meta, arr):
     L, R, terms = meta["L"], meta["reps"], meta["terms"]
-    I = np.eye(2)
+    I = reference_abar(Config(**meta["cfg"]))          # exact ā: I, or M for the anisotropic test
     aMC = np.zeros((R, 2, 2))
     statvar = 0.0                       # estimated E|a_MC - E a_MC|_F^2 = sum_l V_l / N_l
     # V_l is pooled over all R*N_l samples of level l (runs are i.i.d.), so levels with N_l = 1 count too
@@ -75,7 +77,7 @@ def analyse(meta, arr):
     rng = np.random.default_rng(0)
     boot = [math.sqrt(np.mean(rng.choice(err, R) ** 2)) for _ in range(2000)]
     mean_a = aMC.mean(axis=0)
-    return dict(L=L, R=R, p=meta["cfg"]["p"], aMC=aMC, err=err,
+    return dict(L=L, R=R, p=meta["cfg"]["p"], aMC=aMC, err=err, ref=I,
                 rmse=math.sqrt(np.mean(err ** 2)), rmse_ci=np.percentile(boot, [5, 95]),
                 stat_sd=math.sqrt(statvar),
                 bias=np.linalg.norm(mean_a - I), bias_se=math.sqrt(statvar / R),
@@ -155,7 +157,8 @@ def plot_all(p, runs, tag, el, cis):
     ax.set_xscale("log", base=2); ax.set_yscale("log")
     ax.set_xticks(Ls); ax.set_xticklabels([str(int(x)) for x in Ls])
     ax.set_xlabel("box size L"); ax.set_ylabel("error in homogenized matrix (Frobenius norm)")
-    ax.set_title(f"Accuracy of the 2IMC estimator, {el}, reference ā = I" + ("" if p >= 3 else "\n(p < d+1: outside Thm 17)"))
+    ref = "I" if np.allclose(runs[0]["ref"], np.eye(2)) else "M (exact)"
+    ax.set_title(f"Accuracy of the 2IMC estimator, {el}, reference ā = {ref}" + ("" if p >= 3 else "\n(p < d+1: outside Thm 17)"))
     ax.legend(fontsize=8, loc="lower left")
     fig.text(0.01, 0.005, "faint dots: individual estimator runs;  "
              + ", ".join(f"L={int(r['L'])}: {r['R']} runs" for r in runs), fontsize=7, color=MUTED)
@@ -264,6 +267,12 @@ def table(p, runs, el="", cis=None):
             lines.append("CG work / (L^4 log^2 L): " + ", ".join(f"L={r['L']}: {r['work'] / (r['L'] ** 4 * math.log(r['L']) ** 2):.3g}" for r in runs))
     r = runs[-1]
     lines.append(f"mean a_MC at L={r['L']}: {np.array2string(r['mean_a'], precision=5)}")
+    if not np.allclose(r["ref"], np.eye(2)):
+        lines.append(f"exact ā = M:      {np.array2string(r['ref'], precision=5)}")
+        for rr in runs:
+            d, se = rr["mean_a"] - rr["ref"], rr["aMC"].std(axis=0, ddof=1) / math.sqrt(rr["R"])
+            lines.append(f"  L={rr['L']:>3}: mean − M = [{d[0, 0]:+.2e} ± {se[0, 0]:.1e}, {d[0, 1]:+.2e} ± {se[0, 1]:.1e}; "
+                         f"{d[1, 1]:+.2e} ± {se[1, 1]:.1e}]  (entries 11, 12; 22)")
     lines.append(f"levels at L={r['L']}:")
     for lv in r["levels"]:
         lines.append(f"   {lv['label']:>6} n={lv['n']:>4} T={lv['T']:>7.0f} N={lv['N']:>5}  E={lv['mean_norm']:.2e}±{lv['mean_se']:.1e} "
@@ -273,6 +282,38 @@ def table(p, runs, el="", cis=None):
 
 def element_label(el, p):
     return f"P{p} triangles" if el == "P" else f"Q{p} elements"
+
+
+ANISO_TAGS = {"_aniso4_theta30": "anisotropic, ā = M (eigenvalues 2, ½ rotated by 30°)"}
+
+
+def aniso_entries(tag, el):
+    """Entry-wise accuracy of the anisotropic test: RMS error and bias of each entry of a_MC against M."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    style()
+    runs = load(tag)
+    if len(runs) < 2:
+        return
+    Ls = np.array([r["L"] for r in runs], float)
+    fig, axs = plt.subplots(1, 2, figsize=(12, 4.6))
+    for c, (i, j, name) in zip(COLORS, ((0, 0, "a₁₁"), (0, 1, "a₁₂"), (1, 1, "a₂₂"))):
+        rm = np.array([math.sqrt(np.mean((r["aMC"][:, i, j] - r["ref"][i, j]) ** 2)) for r in runs])
+        b = np.array([abs(r["mean_a"][i, j] - r["ref"][i, j]) for r in runs])
+        se = np.array([r["aMC"][:, i, j].std(ddof=1) / math.sqrt(r["R"]) for r in runs])
+        axs[0].plot(Ls, rm, "o-", color=c, label=f"{name}  (M = {runs[0]['ref'][i, j]:.3f}; slope {slope(Ls, rm):.2f})")
+        axs[1].errorbar(Ls, b, yerr=se, fmt="o-", color=c, capsize=3, label=name)
+    axs[0].plot(Ls, rm[0] * (Ls / Ls[0]) ** -2, color=MUTED, lw=1, label="L⁻² (Thm 17)")
+    for ax in axs:
+        ax.set_xscale("log", base=2); ax.set_yscale("log"); ax.set_xticks(Ls); ax.set_xticklabels([str(int(L)) for L in Ls])
+        ax.set_xlabel("box size L"); ax.legend(fontsize=8)
+    axs[0].set_ylabel("RMS error of the entry"); axs[0].set_title("RMS error per entry of a_MC − M")
+    axs[1].set_ylabel("|mean a_MC − M| per entry"); axs[1].set_title("Bias per entry (±1 s.e.)")
+    fig.suptitle(f"Entry-wise accuracy, {el}", fontsize=11, fontweight="bold")
+    fig.tight_layout()
+    fig.savefig(os.path.join(OUT, f"{tag}_entries.png"), dpi=160)
+    plt.close(fig)
 
 
 VARIANT_NAMES = {"": "baseline (β=1, ℓ=0.25, ν=4.5)", "_beta2": "β = 2 (contrast e⁴ ≈ 55)", "_beta3": "β = 3 (contrast e⁶ ≈ 400)",
@@ -288,9 +329,12 @@ def robustness(p=3):
     style()
     found = {}
     for var in VARIANT_NAMES:
-        runs = [r for r in load(f"tri_p{p}{var}") if r["L"] <= 16] if var == "" else load(f"tri_p{p}{var}")
+        runs = load(f"tri_p{p}{var}")
         if len(runs) >= 2:
             found[var] = runs
+    Lmax = min(max(r["L"] for r in runs) for runs in found.values())     # common range of all configurations
+    found = {var: [r for r in runs if r["L"] <= Lmax] for var, runs in found.items()}
+    Lticks = sorted({r["L"] for runs in found.values() for r in runs})
     lines = [f"Robustness of the 2IMC estimator, P{p} triangles (slopes in L with 90% bootstrap intervals)",
              f"{'configuration':<30} {'L':>4} {'runs':>5} {'RMSE':>10} {'stat sd':>10} {'bias':>10} {'CG work':>10} {'work/(L^4 log^2 L)':>19}"]
     fig, axs = plt.subplots(1, 3, figsize=(16, 5.4))
@@ -311,17 +355,17 @@ def robustness(p=3):
         r = runs[-1]
         lv = [x for x in r["levels"] if x["kind"] == "dh"]
         axs[2].plot([x["k"] for x in lv], [x["std"] for x in lv], "o" + ls, color=c, label=lab)
-    LL = np.array([4, 16.0])
+    LL = np.array([4, float(Lmax)])
     if "" in found:
         r0 = found[""][0]["rmse"]
         axs[0].plot(LL, r0 * (LL / 4) ** -2, color=MUTED, lw=1, label="L⁻² (Thm 17)")
     for ax in axs:
         ax.set_yscale("log")
     for ax in axs[:2]:
-        ax.set_xscale("log", base=2); ax.set_xticks([4, 8, 16]); ax.set_xticklabels(["4", "8", "16"]); ax.set_xlabel("box size L")
+        ax.set_xscale("log", base=2); ax.set_xticks(Lticks); ax.set_xticklabels([str(L) for L in Lticks]); ax.set_xlabel("box size L")
     axs[0].set_ylabel("RMS error"); axs[0].set_title("Accuracy")
     axs[1].set_ylabel("CG work / (L⁴ log²L)"); axs[1].set_title("Cost relative to Eq. (10)")
-    axs[2].set_xlabel("level k"); axs[2].set_ylabel("std of Δh_k sample"); axs[2].set_title("Δh level variance at L = 16")
+    axs[2].set_xlabel("level k"); axs[2].set_ylabel("std of Δh_k sample"); axs[2].set_title(f"Δh level variance at L = {Lmax}")
     axs[2].set_xticks(range(0, 1 + max(int(x.get_xdata().max()) for x in axs[2].get_lines())))
     handles, labels = axs[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="lower center", ncol=3, fontsize=8, frameon=False)
@@ -340,9 +384,27 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--element", choices=["P", "Q"], default="P")
     ap.add_argument("--variants", action="store_true", help="draw the robustness comparison instead")
+    ap.add_argument("--aniso", action="store_true",
+                    help="analyse the anisotropic test instead (reads results/anisotropic, writes figures/anisotropic)")
     args = ap.parse_args()
     if args.variants:
         robustness()
+        raise SystemExit
+    if args.aniso:          # kept apart from the isotropic results: results/anisotropic, figures/anisotropic
+        RES, OUT = os.path.join(HERE, "results", "anisotropic"), os.path.join(HERE, "figures", "anisotropic")
+        os.makedirs(OUT, exist_ok=True)
+        for suffix, name in ANISO_TAGS.items():
+            tag, el = f"tri_p3{suffix}", f"P3 triangles, {name}"
+            runs = load(tag)
+            if not runs:
+                continue
+            cis = boot_slopes(runs) if len(runs) >= 2 else None
+            txt = table(3, runs, el, cis)
+            print(txt)
+            open(os.path.join(OUT, f"{tag}_summary.txt"), "w").write(txt + "\n")
+            if len(runs) >= 2:
+                plot_all(3, runs, tag, el, cis)
+                aniso_entries(tag, el)
         raise SystemExit
     pre = "tri_" if args.element == "P" else ""
     ps = sorted({int(m) for f in glob.glob(os.path.join(RES, f"{pre}p*_L*.json"))

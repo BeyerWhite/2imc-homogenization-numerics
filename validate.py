@@ -11,7 +11,9 @@ import sys
 
 import numpy as np
 
-from twoimc import Config, GaussianCoefficient, QpMesh, cg, make_mesh
+from dataclasses import replace
+
+from twoimc import Config, GaussianCoefficient, QpMesh, aniso_matrix, cg, make_mesh
 
 ELEMENT = "P" if "--element" in sys.argv and sys.argv[sys.argv.index("--element") + 1] == "P" else "Q"
 mesh_of = lambda L, n, p: make_mesh(L, n, p, ELEMENT)
@@ -117,7 +119,55 @@ def check_gaussian_cauchy():
     return res
 
 
+def check_anisotropic():
+    """The anisotropic test a(x) = s(M^{-1/2} x) M (Config.aniso, Config.theta), exact ā = M."""
+    cfg = replace(Config(p=3, nu=4.5), aniso=4.0, theta=30.0)
+    M = aniso_matrix(cfg)
+    assert abs(np.linalg.det(M) - 1) < 1e-14 and np.allclose(M, M.T)
+    # 1. constant s: a_hom = c M exactly
+    for el in ("P", "Q"):
+        for p in (1, 2, 3):
+            m = make_mesh(4.0, 5, p, el, M)
+            aq = np.full(quad_points(m)[0].shape, 2.7)
+            ah = solve_hom(m, aq, 1.0)
+            assert np.allclose(ah, 2.7 * M, atol=1e-12), (el, p, ah)
+    print("[aniso] constant s reproduces a_hom = c M exactly (P and Q, p = 1, 2, 3)")
+    # 2. laminate s = s(x1), a = s M: exact a_hom from the 1D cell problem
+    L = 4.0
+    fun = lambda x1: np.exp(0.8 * np.sin(2 * np.pi * x1 / L) + 0.3 * np.cos(4 * np.pi * x1 / L))
+    xs = (np.arange(200000) + 0.5) * L / 200000
+    H, A = 1 / np.mean(1 / fun(xs)), np.mean(fun(xs))
+    m11, m12, m22 = M[0, 0], M[0, 1], M[1, 1]
+    exact = np.array([[m11 * H, m12 * H], [m12 * H, (m22 - m12 ** 2 / m11) * A + m12 ** 2 / m11 * H]])
+    for el in ("P", "Q"):
+        for p in (1, 2, 3):
+            hs, errs = [], []
+            for n in (4, 6, 8, 12, 16):
+                m = make_mesh(L, n, p, el, M)
+                ah = solve_hom(m, fun(quad_points(m)[0]), 1e12)
+                hs.append(m.h); errs.append(np.abs(ah - exact).max())
+            rate = np.polyfit(np.log(hs[-3:]), np.log(errs[-3:]), 1)[0]
+            print(f"[aniso] laminate {el}{p}: max entry error {errs[-1]:.1e} at h={hs[-1]:.2f}, rate h^{rate:.2f} (theory h^{2 * p})")
+    # 3. field: unit variance and covariance C(x) = C_iso(|M^{-1/2} x|), from the exact spectral sums
+    Lf = 8
+    fa, fi = GaussianCoefficient(Lf, cfg), GaussianCoefficient(Lf, replace(cfg, aniso=1.0, theta=0.0))
+    def cov(f, x):
+        k = 2 * np.pi * f.m / Lf
+        return float(((f.amp * f.Mg) ** 2 * np.cos(k[:, None] * x[0] + k[None, :] * x[1])).sum())
+    lam, V = np.linalg.eigh(M)
+    worst = 0.0
+    for r in (0.1, 0.25, 0.5, 1.0):
+        for li, v in zip(lam, V.T):
+            worst = max(worst, abs(cov(fa, r * v) - cov(fi, np.array([r / math.sqrt(li), 0.0]))))
+    print(f"[aniso] field variance {fa.variance:.6f} (isotropic {fi.variance:.6f}); "
+          f"max |C(r v) - C_iso(r / sqrt(lambda))| along the eigenvectors = {worst:.1e}")
+    assert worst < 1e-4 and abs(fa.variance - fi.variance) < 1e-4
+
+
 if __name__ == "__main__":
+    if "--aniso" in sys.argv:
+        check_anisotropic()
+        raise SystemExit
     check_field()
     check_constant()
     lam = check_laminate()

@@ -5,7 +5,8 @@ Example:
 
 --element P (P_p on triangles) writes results/tri_p{p}_L{L}.*, --element Q (Q_p on
 quadrilaterals, the default for backward compatibility) writes results/p{p}_L{L}.*.
-Robustness variants (--beta, --ell, --nu, --kmax) add a suffix, e.g. tri_p3_beta2_L16.
+Robustness variants (--beta, --ell, --nu, --kmax) add a suffix, e.g. tri_p3_beta2_L16; the
+anisotropic test (--aniso 4 --theta 30) writes tri_p3_aniso4_theta30_L{L}.
 
 Each (L, p) writes results/<tag>.npz with every sample's value and cost, plus a JSON
 sidecar with the level hierarchy, configuration and wall-clock time. Progress is
@@ -130,12 +131,14 @@ def main():
     ap.add_argument("--ell", type=float, default=None, help="Matern length (default 0.25)")
     ap.add_argument("--nu", type=float, default=None, help="Matern smoothness (default p + 1.5)")
     ap.add_argument("--kmax", type=float, default=None, help="absolute Fourier cut-off (rough fields)")
+    ap.add_argument("--aniso", type=float, default=None, help="eigenvalue ratio of M (anisotropic test, exact ā = M)")
+    ap.add_argument("--theta", type=float, default=None, help="rotation of M in degrees")
     args = ap.parse_args()
     assert len(args.L) == len(args.reps)
     os.makedirs(args.out, exist_ok=True)
     cfg = replace(Config(), p=args.p, nu=args.p + 1.5, element=args.element)    # Def. 12 needs nu > p + 1
     variant = ""
-    for name in ("beta", "ell", "nu", "kmax"):
+    for name in ("beta", "ell", "nu", "kmax", "aniso", "theta"):
         v = getattr(args, name)
         if v is not None:
             cfg = replace(cfg, **{name: v})

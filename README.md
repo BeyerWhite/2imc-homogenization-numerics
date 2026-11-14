@@ -19,10 +19,10 @@ Two finite-element families are implemented, and every result exists for both:
 | file | contents |
 |---|---|
 | `twoimc.py` | the Gaussian field, the periodic P_p (triangles) and Q_p (quadrilaterals) FEM, CG, the level hierarchy and one-sample routines |
-| `validate.py` | checks of the field and the FEM; `--plot` draws `figures/fem_convergence.png` (Q_p) or, with `--element P`, `figures/fem_convergence_tri.png` |
-| `run_experiments.py` | runs R independent copies of the estimator for each L, in parallel; writes `results/tri_p{p}_L{L}.{npz,json}` (`--element P`) or `results/p{p}_L{L}.*` (`--element Q`, the default). `--beta`, `--ell`, `--nu`, `--kmax` change the coefficient field and add a suffix such as `tri_p3_beta2_L16`. It checkpoints every 5 minutes, so rerunning the same command after an interruption resumes, and finished L values are skipped |
+| `validate.py` | checks of the field and the FEM (`--aniso`: the anisotropic coefficient); `--plot` draws `figures/fem_convergence.png` (Q_p) or, with `--element P`, `figures/fem_convergence_tri.png` |
+| `run_experiments.py` | runs R independent copies of the estimator for each L, in parallel; writes `results/tri_p{p}_L{L}.{npz,json}` (`--element P`) or `results/p{p}_L{L}.*` (`--element Q`, the default). `--beta`, `--ell`, `--nu`, `--kmax` change the coefficient field and add a suffix such as `tri_p3_beta2_L16`; `--aniso`, `--theta` select the anisotropic test (use with `--out results/anisotropic`). It checkpoints every 5 minutes, so rerunning the same command after an interruption resumes, and finished L values are skipped |
 | `corrector_convergence.py`, `plot_corrector.py` | Cauchy convergence of the corrector along the (T, h) path for fixed L; writes `results/corrector_{tri_}p{p}.json` and `figures/corrector_convergence_{tri_}p{p}.{png,txt}` |
-| `make_plots.py` | analysis with bootstrap intervals, the figures in `figures/` and `figures/{tri_}p{p}_summary.txt`; `--element P` (default) or `Q`; `--variants` draws the robustness figure `figures/tri_p3_robustness.png` |
+| `make_plots.py` | analysis with bootstrap intervals, the figures in `figures/` and `figures/{tri_}p{p}_summary.txt`; `--element P` (default) or `Q`; `--variants` draws the robustness figure `figures/tri_p3_robustness.png`; `--aniso` analyses the anisotropic test into `figures/anisotropic/` |
 | `baselines.py` | coupled solves along the pure h-ladder and the pure T-ladder that end at the 2IMC's finest state; writes `results/baselines_tri_p{p}.{npz,json}` |
 | `compare_methods.py` | cost of plain MC, single-index MLMC in h, single-index MLMC in T and the 2IMC (Eq. 11 and variance-optimal sample sizes) at equal accuracy; writes `figures/tri_p{p}_methods*` and `figures/tri_p{p}_sample_sizes.png`; `--variant _nu0.5_kmax75` repeats it for a robustness field (`baselines.py` takes the same `--nu`/`--kmax`/`--beta`/`--ell` flags) |
 
@@ -37,10 +37,10 @@ python -m venv .venv && .venv/bin/pip install numpy scipy matplotlib
 .venv/bin/python baselines.py --element P --p 3 --L 4 8 16 32 --reals 256 128 64 32
 .venv/bin/python compare_methods.py --p 3
 # robustness: one run per variant, then the summary figure
-.venv/bin/python run_experiments.py --element P --p 3 --L 4 8 16 --reps 128 64 32 --beta 2
+.venv/bin/python run_experiments.py --element P --p 3 --L 4 8 16 32 --reps 128 64 32 16 --beta 2
 #   … likewise --beta 3, --ell 0.125, --ell 0.5, --nu 2.5, --nu 1.5 --kmax 75, --nu 0.5 --kmax 75
 .venv/bin/python make_plots.py --variants
-.venv/bin/python baselines.py --element P --p 3 --L 4 8 16 --reals 256 128 64 --nu 0.5 --kmax 75   # likewise --nu 1.5
+.venv/bin/python baselines.py --element P --p 3 --L 4 8 16 32 --reals 256 128 64 32 --nu 0.5 --kmax 75   # likewise --nu 1.5
 .venv/bin/python compare_methods.py --p 3 --variant _nu0.5_kmax75
 ```
 
@@ -69,6 +69,18 @@ same realisation, which is the coupling the estimator needs.
 same law. It is also invariant under 90° rotations. In 2D, Keller–Dykhne duality then
 gives ā = I exactly. This is the 2D analogue of Lemma 48 for the Gaussian case. All
 errors are measured against I.
+
+**Anisotropic test (test 3), exact ā = M.** `--aniso 4 --theta 30` uses
+a(x) = s(M^(−1/2) x) · M, where s is the isotropic scalar coefficient above and
+M = R(30°) diag(2, ½) R(30°)ᵀ = [[1.625, 0.650], [0.650, 0.875]] (det M = 1). The
+substitution x = M^(1/2) y turns the corrector problem for a into the isotropic one for s, so
+ā = M^(1/2) · I · M^(1/2) = M exactly, including the off-diagonal entry. The field s(M^(−1/2) x)
+has spectral density S(k · M k), sampled on the same dual lattice; det M = 1 keeps unit
+variance. The mesh is aligned with neither eigenvector of M. `validate.py --aniso` checks
+that a constant s gives exactly c·M, that a laminate converges to its exact (full-tensor)
+ā at the h^(2p) rate, and that the field covariance is C_iso(|M^(−1/2) x|). Results are kept
+apart from the isotropic ones, in `results/anisotropic/`, `figures/anisotropic/` and
+`logs/anisotropic/`.
 
 **FEM** (Definition 9). Periodic uniform meshes with n × n squares of side h = L/n, equispaced
 nodes (the standard nodal basis) and (np)² DOFs in both families:
@@ -228,70 +240,84 @@ would recover the factor 3–4.
 
 ### Robustness in contrast, correlation length and smoothness (P3 triangles)
 
-Seven variants of the coefficient field, each with L = 4, 8, 16 and 128, 64, 32 runs
-(`figures/tri_p3_robustness.{png,txt}`; the baseline row uses the main runs up to L = 16).
-ā = I still holds exactly for every variant, since the symmetry argument does not depend on
-β, ℓ or ν.
+Seven variants of the coefficient field, each with L = 4, 8, 16, 32 and 128, 64, 32, 16 runs
+(`figures/tri_p3_robustness.{png,txt}`; the baseline row is the main run). ā = I still holds
+exactly for every variant, since the symmetry argument does not depend on β, ℓ or ν.
 
-| configuration | RMSE slope [90% CI] | stat. sd slope | RMSE at L = 16 | work/(L⁴ log²L) at L = 4, 8, 16 (×10⁴) |
+| configuration | RMSE slope [90% CI] | stat. sd slope | RMSE at L = 32 | work/(L⁴ log²L) at L = 4, 8, 16, 32 (×10⁴) |
 |---|---|---|---|---|
-| baseline (β = 1, ℓ = 0.25, ν = 4.5) | −2.01 [−2.18, −1.86] | −1.94 | 8.3e-3 | 7.1, 7.4, 6.6 |
-| β = 2 (contrast e⁴ ≈ 55) | −1.91 [−2.03, −1.80] | −1.87 | 3.1e-2 | 10.8, 12.1, 10.9 |
-| β = 3 (contrast e⁶ ≈ 400) | −1.86 [−1.95, −1.78] | −1.86 | 8.6e-2 | 16.2, 19.8, 18.0 |
-| ℓ = 0.125 | −1.89 [−2.06, −1.76] | −2.01 | 4.5e-3 | 6.9, 6.9, 6.1 |
-| ℓ = 0.5 | −1.92 [−2.02, −1.81] | −1.90 | 2.3e-2 | 5.4, 6.9, 6.8 |
-| ν = 2.5 (violates ν > p + 1) | −1.96 [−2.11, −1.82] | −1.97 | 6.3e-3 | 7.1, 7.3, 6.4 |
-| ν = 1.5 (rough, cut at \|k\| ≤ 75) | −1.74 [−1.88, −1.61] | −1.98 | 7.3e-3 | 6.9, 7.0, 6.2 |
-| ν = 0.5 (very rough, cut at \|k\| ≤ 75) | −0.50 [−0.55, −0.45] | −1.87 | 4.6e-2 | 6.2, 6.2, 5.6 |
+| baseline (β = 1, ℓ = 0.25, ν = 4.5) | −1.99 [−2.10, −1.90] | −1.94 | 2.2e-3 | 7.1, 7.4, 6.6, 6.2 |
+| β = 2 (contrast e⁴ ≈ 55) | −1.86 [−1.96, −1.78] | −1.86 | 9.3e-3 | 10.8, 12.1, 10.9, 10.4 |
+| β = 3 (contrast e⁶ ≈ 400) | −1.83 [−1.91, −1.76] | −1.81 | 2.6e-2 | 16.2, 19.8, 18.0, 17.2 |
+| ℓ = 0.125 | −1.84 [−1.97, −1.74] | −1.99 | 1.3e-3 | 6.9, 6.9, 6.1, 5.8 |
+| ℓ = 0.5 | −1.88 [−1.99, −1.79] | −1.86 | 6.5e-3 | 5.4, 6.9, 6.8, 6.7 |
+| ν = 2.5 (violates ν > p + 1) | −1.94 [−2.12, −1.81] | −1.96 | 1.6e-3 | 7.1, 7.3, 6.4, 6.1 |
+| ν = 1.5 (rough, cut at \|k\| ≤ 75) | −1.54 [−1.63, −1.46] | −1.97 | 3.3e-3 | 6.9, 7.0, 6.2, 5.9 |
+| ν = 0.5 (very rough, cut at \|k\| ≤ 75) | −0.46 [−0.49, −0.43] | −1.85 | 3.5e-2 | 6.2, 6.2, 5.6, 5.4 |
 
-- **Cost is robust.** CG work divided by L⁴ log²L stays flat in every variant. Higher contrast
-  raises the constant (1.6× for β = 2, 2.7× for β = 3, from the worse conditioning) but not
-  the rate.
-- **Contrast and correlation length change constants, not rates.** Larger contrast or a longer
-  correlation length means fewer effectively independent cells per box, so larger errors
-  (and a larger bias share: at β = 3 the bias exceeds the statistical error). The slopes stay
-  between −1.86 and −1.92, slightly below −2, which over L = 4–16 is within the
-  pre-asymptotic range; the statistical part alone keeps slopes −1.86 to −2.01.
+- **Cost is robust.** CG work divided by L⁴ log²L stays flat or falls slightly up to L = 32 in
+  every variant (CG-work slopes 4.78–4.97). Higher contrast raises the constant (1.7× for
+  β = 2, 2.8× for β = 3 at L = 32, from the worse conditioning) but not the rate.
+- **Contrast and correlation length change constants, and the rate only by a slowly growing
+  factor.** Larger contrast or a longer correlation length means fewer effectively independent
+  cells per box, so larger errors, and a larger bias share (at β = 3 the bias, 2.1e-2, exceeds
+  the statistical error, 1.4e-2, at every L). The RMSE slopes stay between −1.83 and −1.88
+  with L = 32 included, so the shortfall from −2 is not shrinking. For β it sits in the
+  statistical part (slopes −1.86, −1.81): the ΔT terms take a growing share of the variance
+  (β = 3: 52% at L = 16, 67% at L = 32; baseline: 16% and 21%). Each ΔT level contributes
+  about equally under Eq. (11), so their total grows with the number of levels, ∼log L. This
+  is the (log L)^C of Eq. (9) becoming visible, not a different power.
 - **Smoothness: the condition ν > p + 1 of Definition 12 is sufficient but not sharp.** ν = 2.5
-  behaves exactly like the baseline. At ν = 1.5 the statistical part still decays like L⁻²,
-  but the bias decays only like L^(−1.2), pulling the RMSE slope to −1.74. At ν = 0.5 the
-  bias stagnates near 5e-2 (slope −0.4) and dominates: the coefficient varies on scales
-  (down to 2π/75 ≈ 0.08) far below the finest mesh h_F = L^(−1/3) ≈ 0.4, so the FEM does not
-  resolve it. The statistical part (slope −1.87) is unaffected, so the loss is entirely in the
-  discretisation bias, which is the part the smoothness assumption controls.
-- **Mesh corrections matter for rough fields.** The Δh level variances (right panel) grow by
-  one to two orders of magnitude as ν decreases. With the Eq. (11) sizes, at L = 16 the Δh
-  levels contribute under 0.5% of the estimator's statistical variance for
-  every smooth variant, 1.4% for ν = 1.5 and 40% for ν = 0.5. Accordingly the optimal
-  allocation saves less: it costs 0.26× of Eq. (11) for the baseline, 0.30× for ν = 1.5 and
-  0.58× for ν = 0.5 (β = 2, 3: 0.33×, 0.36×).
+  behaves like the baseline up to L = 32. At ν = 1.5 the statistical part still decays like
+  L⁻² (slope −1.97), but the bias decays only like L^(−1.15) (3.4e-2, 1.3e-2, 6.3e-3, 3.0e-3),
+  and at L = 32 it is three times the statistical error. The RMSE slope therefore drops from
+  −1.74 (L ≤ 16) to −1.54 (L ≤ 32) and will approach the bias rate for larger L. At ν = 0.5
+  the bias stagnates (8.1e-2 to 3.5e-2, slope −0.4) and dominates: the coefficient varies on
+  scales (down to 2π/75 ≈ 0.08) far below the finest mesh h_F = L^(−1/3) ≈ 0.31 at L = 32, so
+  the FEM does not resolve it. The statistical part (slope −1.85) is unaffected, so the loss is
+  entirely in the discretisation bias, which is the part the smoothness assumption controls.
+- **Mesh corrections matter for rough fields.** The Δh level variances (right panel, L = 32)
+  grow by one to two orders of magnitude as ν decreases. With the Eq. (11) sizes the Δh levels
+  contribute under 0.5% of the estimator's statistical variance for every smooth variant,
+  1.6% for ν = 1.5 and 51% for ν = 0.5 (L = 32; at L = 16: 1.4% and 40%). Accordingly the
+  optimal allocation saves less: from the 2IMC's own level statistics it costs 0.20× of
+  Eq. (11) for the baseline, 0.24× for ν = 1.5, 0.54× for ν = 0.5 and 0.28×, 0.31× for
+  β = 2, 3, the same at L = 16 and 32. (`compare_methods.py`, which rounds the sizes to whole
+  samples, gives 0.25×, 0.27× and 0.58× for the first three at L = 32.)
 
 ### Comparison with standard methods for rough fields (P3 triangles)
 
-The method comparison repeated for ν = 1.5 and ν = 0.5 (L = 4, 8, 16; baselines with 256,
-128, 64 realisations; figures `figures/tri_p3_nu{1.5,0.5}_kmax75_methods*`).
-CG work to reach the 2IMC's accuracy, as a ratio to the 2IMC with Eq. (11) sizes, at L = 16:
+The method comparison repeated for ν = 1.5 and ν = 0.5 (L = 4, 8, 16, 32; baselines with 256,
+128, 64, 32 realisations; figures `figures/tri_p3_nu{1.5,0.5}_kmax75_methods*`).
+CG work to reach the 2IMC's accuracy, as a ratio to the 2IMC with Eq. (11) sizes, at L = 32
+(L = 16 in parentheses):
 
 | method | baseline ν = 4.5 | ν = 1.5 | ν = 0.5 | slope in L, ν = 1.5 / 0.5 |
 |---|---|---|---|---|
-| 2IMC, Eq. (11) sizes | 1 | 1 | 1 | 4.92 / 4.92 |
-| 2IMC, optimal sizes | 0.26 [0.26, 0.27] | 0.30 [0.29, 0.30] | 0.58 [0.57, 0.60] | 4.76 / 4.94 |
-| MLMC in h only | 0.23 [0.19, 0.27] | 0.39 [0.32, 0.47] | 0.99 [0.86, 1.14] | 5.13 / 5.42 |
-| MLMC in T only | 2.08 [1.72, 2.38] | 2.16 [1.75, 2.61] | 1.19 [0.96, 1.47] | 5.78 / 5.43 |
-| plain Monte Carlo | 2.70 [2.14, 3.24] | 4.17 [3.26, 5.26] | 2.59 [1.99, 3.27] | 6.29 / 6.05 |
+| 2IMC, Eq. (11) sizes | 1 | 1 | 1 | 4.79 / 4.80 |
+| 2IMC, optimal sizes | 0.25 [0.24, 0.25] (0.26) | 0.27 [0.27, 0.28] (0.30) | 0.58 [0.57, 0.60] (0.58) | 4.66 / 4.82 |
+| MLMC in h only | 0.28 [0.19, 0.34] (0.23) | 0.38 [0.27, 0.47] (0.39) | 1.00 [0.80, 1.15] (0.99) | 4.93 / 5.15 |
+| MLMC in T only | 3.71 [2.65, 4.43] (2.08) | 2.69 [1.83, 3.39] (2.16) | 1.10 [0.73, 1.43] (1.19) | 5.47 / 5.10 |
+| plain Monte Carlo | 7.48 [4.85, 9.38] (2.70) | 6.66 [4.12, 9.07] (4.17) | 3.54 [2.15, 4.82] (2.59) | 5.94 / 5.71 |
 
-- **For rough fields the 2IMC is the cheapest method, and its lead grows with L.** With optimal
-  sizes it needs 0.77× (ν = 1.5) and 0.59× (ν = 0.5) of the work of MLMC in h only at
-  L = 16, and its cost grows more slowly (L^4.76 against L^5.13, and L^4.94 against L^5.42).
-  At ν = 0.5 even the a priori Eq. (11) sizes match MLMC in h with optimal sizes.
+- **For rough fields the 2IMC is the cheapest method, and L = 32 confirms it.** With optimal
+  sizes it needs 0.71× (ν = 1.5) and 0.58× (ν = 0.5) of the work of MLMC in h only at
+  L = 32 (0.77× and 0.59× at L = 16), and its cost grows more slowly over L = 4–32 (L^4.66
+  against L^4.93, and L^4.82 against L^5.15). At ν = 0.5 even the a priori Eq. (11) sizes
+  match MLMC in h with optimal sizes.
+- **How firm this is.** At ν = 0.5 the lead is clear: the MLMC-in-h interval [0.80, 1.15]
+  lies well above the 2IMC's 0.58. At ν = 1.5 the lower end of the MLMC-in-h interval (0.27)
+  touches the 2IMC's value, so the lead is likely but not certain at the 90% level. The work
+  ratio to MLMC in h has fallen steadily with L at ν = 1.5 (1.28, 0.94, 0.77, 0.71); at
+  ν = 0.5 it fell from L = 4 to 16 (1.14, 0.75, 0.59) and stayed at 0.58 at L = 32.
 - The reason is the one given above, now in the other direction. Once the mesh corrections
   carry real variance, MLMC in h has to pay for them at T = L², where every solve needs many
   CG iterations, while the 2IMC takes its Δh steps at small T, where solves are cheap.
-- In CPU time (more affected by machine load) the ordering is the same at ν = 0.5 (2IMC optimal
-  0.62 against 0.91 for MLMC in h at L = 16) and a tie at ν = 1.5 (0.33 against 0.33, slopes
-  3.99 against 4.25).
-- Caveat: at ν = 0.5 the RMS error is dominated by the discretisation bias, which is the same
-  for all methods (they share the finest state); the comparison is at equal statistical error.
+- In CPU time (more affected by machine load) the ordering is the same at L = 32: 2IMC
+  optimal 0.30 against 0.39 for MLMC in h at ν = 1.5, and 0.60 against 0.99 at ν = 0.5.
+- Caveat: at ν ≤ 1.5 the RMS error at L = 32 is dominated by the discretisation bias, which is
+  the same for all methods (they share the finest state); the comparison is at equal
+  statistical error.
 
 
 ## Results, Q_p on quadrilaterals

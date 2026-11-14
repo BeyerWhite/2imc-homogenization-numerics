@@ -35,7 +35,7 @@ from dataclasses import replace
 
 import numpy as np
 
-from twoimc import Config, _get_field, _get_mesh, _solve
+from twoimc import Config, _get_field, _get_mesh, _solve, aniso_matrix
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -54,7 +54,7 @@ def one_solve(args):
     t0 = time.process_time()
     field = _get_field(L, cfg)
     ghat = field.sample(np.random.default_rng(np.random.SeedSequence((seed, L, r))))
-    m = _get_mesh(L, n, cfg.p, cfg.element)
+    m = _get_mesh(L, n, cfg.p, cfg.element, aniso_matrix(cfg))
     aq = m.coef_at_quad(field, ghat)
     a, it, work = _solve(m, aq, m.stiffness_data(aq), T, cfg)
     return L, r, which, k, a, it, work, time.process_time() - t0
@@ -73,10 +73,12 @@ def main():
     ap.add_argument("--ell", type=float, default=None)
     ap.add_argument("--nu", type=float, default=None)
     ap.add_argument("--kmax", type=float, default=None)
+    ap.add_argument("--aniso", type=float, default=None)
+    ap.add_argument("--theta", type=float, default=None)
     args = ap.parse_args()
     cfg = replace(Config(), p=args.p, nu=args.p + 1.5, element=args.element)
     variant = ""
-    for name in ("beta", "ell", "nu", "kmax"):          # same suffixes as run_experiments.py
+    for name in ("beta", "ell", "nu", "kmax", "aniso", "theta"):   # same suffixes as run_experiments.py
         val = getattr(args, name)
         if val is not None:
             cfg = replace(cfg, **{name: val})

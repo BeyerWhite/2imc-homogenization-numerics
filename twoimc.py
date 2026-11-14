@@ -48,9 +48,32 @@ class Config:
     cg_maxiter: int = 200_000
     element: str = "Q"         # "P": P_p Lagrange on triangles;  "Q": Q_p Lagrange on quadrilaterals
     kmax: float = math.inf     # optional absolute Fourier cut-off (used only for rough fields, small nu)
+    aniso: float = 1.0         # anisotropy: a(x) = s(M^{-1/2} x) M with M = R(theta) diag(sqrt(aniso), 1/sqrt(aniso)) R(theta)^T
+    theta: float = 0.0         # rotation angle of M in degrees; the exact homogenized coefficient is then M
 
     def to_dict(self):
         return asdict(self)
+
+
+def aniso_matrix(cfg: Config):
+    """The constant matrix M of the anisotropic coefficient a(x) = s(M^{-1/2} x) M, or None
+    for the isotropic case (aniso = 1).
+
+    With s the isotropic scalar field, the substitution x = M^{1/2} y turns the corrector problem
+    for a into the isotropic one for s, so ā = M^{1/2} ā_s M^{1/2} = M exactly (ā_s = I by
+    duality). det M = 1, so the field keeps unit variance and the same spectral normalisation.
+    """
+    if cfg.aniso == 1.0:
+        return None
+    c, s = math.cos(math.radians(cfg.theta)), math.sin(math.radians(cfg.theta))
+    R = np.array([[c, -s], [s, c]])
+    return R @ np.diag([math.sqrt(cfg.aniso), 1.0 / math.sqrt(cfg.aniso)]) @ R.T
+
+
+def reference_abar(cfg: Config) -> np.ndarray:
+    """Exact homogenized coefficient of the ensemble: I (Keller-Dykhne), or M if anisotropic."""
+    M = aniso_matrix(cfg)
+    return np.eye(2) if M is None else M
 
 
 # --------------------------------------------------------------------------------------
@@ -72,11 +95,18 @@ class GaussianCoefficient:
     def __init__(self, L: float, cfg: Config):
         self.L, self.cfg = L, cfg
         kcut = min(cfg.tail_tol ** (-1.0 / (2 * cfg.nu)) / cfg.ell, cfg.kmax)
-        mmax = int(math.ceil(kcut * L / (2 * math.pi)))
+        M = aniso_matrix(cfg)
+        # anisotropic: covariance C_iso(M^{-1/2} x) has spectral density S_iso(k . M k) (det M = 1);
+        # the ellipse k . M k <= kcut^2 reaches out to |k| = kcut / sqrt(lambda_min(M))
+        kbox = kcut if M is None else kcut / math.sqrt(np.linalg.eigvalsh(M)[0])
+        mmax = int(math.ceil(kbox * L / (2 * math.pi)))
         self.Mg = Mg = 2 * mmax + 1                       # odd => exact Hermitian symmetry
         self.m = np.fft.fftfreq(Mg, 1.0 / Mg).round().astype(np.int64)
         k = 2 * math.pi * self.m / L
-        k2 = k[:, None] ** 2 + k[None, :] ** 2
+        if M is None:
+            k2 = k[:, None] ** 2 + k[None, :] ** 2
+        else:
+            k2 = M[0, 0] * k[:, None] ** 2 + 2 * M[0, 1] * k[:, None] * k[None, :] + M[1, 1] * k[None, :] ** 2
         S = (1.0 + cfg.ell ** 2 * k2) ** (-(cfg.nu + 1.0))
         S[k2 > kcut ** 2] = 0.0
         S_int = math.pi / (cfg.ell ** 2 * cfg.nu)       # int_{R^2} S(k) dk
@@ -155,8 +185,9 @@ class QpMesh:
     Quadrature: tensor Gauss-Legendre with p + 1 points per direction (exact for Q_{2p+1}).
     """
 
-    def __init__(self, L: float, n: int, p: int):
+    def __init__(self, L: float, n: int, p: int, M=None):
         self.L, self.n, self.p = L, n, p
+        self.M = M                                    # constant matrix factor of a = s M (None: identity)
         self.h = h = L / n
         self.Np = Np = n * p
         self.Ndof = Np * Np
@@ -173,11 +204,10 @@ class QpMesh:
         w2 = np.outer(wq, wq).ravel()
         self.w2 = w2
         # in 2D the reference stiffness kernel is h-independent: (1/h)^2 * h^2
-        self.Kker = (w2[:, None, None] * (Gx[:, :, None] * Gx[:, None, :]
-                                          + Gy[:, :, None] * Gy[:, None, :])).reshape(nq * nq, nloc * nloc)
+        self.Kker = _stiff_kernel(w2, Gx, Gy, M).reshape(nq * nq, nloc * nloc)
         Mloc = h * h * np.einsum("q,qa,qb->ab", w2, N2, N2)
         # load-vector kernels:  -int a d_i N_A = -h * sum_Q a_Q w_Q dN_A/dxi_i
-        self.Rker = [-h * w2[:, None] * Gx, -h * w2[:, None] * Gy]
+        self.Rker = _load_kernels(h, w2, Gx, Gy, M)
         # connectivity
         e = np.arange(n)
         a = np.arange(p + 1)
@@ -219,7 +249,7 @@ class QpMesh:
         """a^{L,T,h}_{ji} = e_j . L^{-2} int a (e_i + grad phi_i)
                          = L^{-2} ( delta_ij int a  -  b_j . phi_i )   (same quadrature)."""
         mean_a = self.h * self.h * float((aq * self.w2).sum())
-        return (mean_a * np.eye(2) - b.T @ phi) / self.L ** 2
+        return (mean_a * (np.eye(2) if self.M is None else self.M) - b.T @ phi) / self.L ** 2
 
     def quad_points(self):
         """Physical coordinates and weights of all quadrature points, each of shape (n_el * nq^2,)."""
@@ -289,8 +319,9 @@ class PpMesh:
     shape (2 n^2, (p+1)^2) in that order.
     """
 
-    def __init__(self, L: float, n: int, p: int):
+    def __init__(self, L: float, n: int, p: int, M=None):
         self.L, self.n, self.p = L, n, p
+        self.M = M                                          # constant matrix factor of a = s M (None: identity)
         self.h = h = L / n
         self.Np = Np = n * p
         self.Ndof = Np * Np
@@ -311,10 +342,9 @@ class PpMesh:
             x, y = (xi + eta, eta) if typ == 0 else (xi, xi + eta)
             Vq, Dxq, Dyq = _mono_eval(p, x, y)
             N, Gx, Gy = Vq @ C, Dxq @ C, Dyq @ C              # (nq, nloc), cell-coordinate derivatives
-            Kker = (w[:, None, None] * (Gx[:, :, None] * Gx[:, None, :]
-                                        + Gy[:, :, None] * Gy[:, None, :])).reshape(nq, nloc * nloc)
+            Kker = _stiff_kernel(w, Gx, Gy, M).reshape(nq, nloc * nloc)
             Mloc = h * h * np.einsum("q,qa,qb->ab", w, N, N)
-            Rker = [-h * w[:, None] * Gx, -h * w[:, None] * Gy]
+            Rker = _load_kernels(h, w, Gx, Gy, M)
             e = np.arange(n)
             gx = (e[:, None, None] * p + np.array([a for a, _ in nodes])[None, None, :]) % Np
             gy = (e[None, :, None] * p + np.array([b for _, b in nodes])[None, None, :]) % Np
@@ -363,7 +393,7 @@ class PpMesh:
 
     def homogenized(self, aq: np.ndarray, b: np.ndarray, phi: np.ndarray) -> np.ndarray:
         mean_a = self.h * self.h * float((aq * self.w2).sum())
-        return (mean_a * np.eye(2) - b.T @ phi) / self.L ** 2
+        return (mean_a * (np.eye(2) if self.M is None else self.M) - b.T @ phi) / self.L ** 2
 
     def quad_points(self):
         n, h = self.n, self.h
@@ -398,8 +428,24 @@ class PpMesh:
         return out
 
 
-def make_mesh(L: float, n: int, p: int, element: str = "Q"):
-    return PpMesh(L, n, p) if element == "P" else QpMesh(L, n, p)
+def _stiff_kernel(w, Gx, Gy, M):
+    """sum_q w_q grad N_A . M grad N_B (M = None: identity), shape (nq, nloc, nloc)."""
+    if M is None:
+        return w[:, None, None] * (Gx[:, :, None] * Gx[:, None, :] + Gy[:, :, None] * Gy[:, None, :])
+    return w[:, None, None] * (M[0, 0] * Gx[:, :, None] * Gx[:, None, :]
+                               + M[0, 1] * (Gx[:, :, None] * Gy[:, None, :] + Gy[:, :, None] * Gx[:, None, :])
+                               + M[1, 1] * Gy[:, :, None] * Gy[:, None, :])
+
+
+def _load_kernels(h, w, Gx, Gy, M):
+    """Kernels of b_i = -int s (M e_i) . grad N_A, i = 1, 2 (M = None: identity)."""
+    if M is None:
+        return [-h * w[:, None] * Gx, -h * w[:, None] * Gy]
+    return [-h * w[:, None] * (M[i, 0] * Gx + M[i, 1] * Gy) for i in range(2)]
+
+
+def make_mesh(L: float, n: int, p: int, element: str = "Q", M=None):
+    return PpMesh(L, n, p, M) if element == "P" else QpMesh(L, n, p, M)
 
 
 # --------------------------------------------------------------------------------------
@@ -487,10 +533,10 @@ def _get_field(L, cfg):
     return _FIELDS[key]
 
 
-def _get_mesh(L, n, p, element="Q"):
-    key = (L, n, p, element)
+def _get_mesh(L, n, p, element="Q", M=None):
+    key = (L, n, p, element, None if M is None else tuple(np.asarray(M).ravel()))
     if key not in _MESHES:
-        _MESHES[key] = make_mesh(L, n, p, element)
+        _MESHES[key] = make_mesh(L, n, p, element, M)
     return _MESHES[key]
 
 
@@ -507,13 +553,13 @@ def sample_term(L: int, term: Term, seed: tuple, cfg: Config):
     t0 = time.process_time()
     field = _get_field(L, cfg)
     ghat = field.sample(np.random.default_rng(np.random.SeedSequence(seed)))
-    mf = _get_mesh(L, term.n_fine, cfg.p, cfg.element)
+    mf = _get_mesh(L, term.n_fine, cfg.p, cfg.element, aniso_matrix(cfg))
     aq_f = mf.coef_at_quad(field, ghat)
     Kd_f = mf.stiffness_data(aq_f)
     a_f, it_f, w_f = _solve(mf, aq_f, Kd_f, term.T_fine, cfg)
     a_c, it_c, w_c = None, 0, 0
     if term.kind == "dh":
-        mc = _get_mesh(L, term.n_coarse, cfg.p, cfg.element)
+        mc = _get_mesh(L, term.n_coarse, cfg.p, cfg.element, aniso_matrix(cfg))
         aq_c = mc.coef_at_quad(field, ghat)
         a_c, it_c, w_c = _solve(mc, aq_c, mc.stiffness_data(aq_c), term.T_coarse, cfg)
     elif term.kind == "dT":                     # same mesh and coefficient, smaller T
