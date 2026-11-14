@@ -1,0 +1,29 @@
+p = 3  P3 triangles, anisotropic, ā = M (eigenvalues 2, ½ rotated by 30°)
+   L  runs       RMSE                  90% CI    stat sd       bias       ±se  CPU s/run wall s/run    CG work
+   4   128  1.797e-01 [1.623e-01, 1.972e-01]  1.606e-01  6.868e-02  1.42e-02        0.2       0.04  3.389e+07
+   8    64  4.986e-02 [4.384e-02, 5.578e-02]  4.059e-02  2.268e-02  5.07e-03        4.4       0.63  1.228e+09
+  16    32  1.221e-02 [9.853e-03, 1.431e-02]  1.053e-02  8.088e-03  1.86e-03      107.1      19.15  3.094e+10
+  32    16  2.754e-03 [1.925e-03, 3.481e-03]  2.784e-03  1.285e-03  6.96e-04     2436.9     342.73  7.372e+11
+slopes in L: RMSE -2.01, CPU 4.45, CG work 4.79, Lemma-15 model 4.86
+90% bootstrap intervals of the slopes (cost intervals reflect sampling only, not machine load): RMSE [-2.19, -1.89], stat sd [-1.96, -1.94], CPU [4.44, 4.45], CG work [4.79, 4.79]
+CG work / (L^4 log^2 L): L=4: 6.89e+04, L=8: 6.94e+04, L=16: 6.14e+04, L=32: 5.85e+04
+mean a_MC at L=32: [[1.62615 0.64976]
+ [0.64976 0.87547]]
+exact ā = M:      [[1.625   0.64952]
+ [0.64952 0.875  ]]
+  L=  4: mean − M = [+6.04e-02 ± 1.2e-02, +1.71e-02 ± 4.7e-03; +2.19e-02 ± 6.3e-03]  (entries 11, 12; 22)
+  L=  8: mean − M = [+1.96e-02 ± 4.4e-03, +6.01e-03 ± 1.7e-03; +7.64e-03 ± 2.3e-03]  (entries 11, 12; 22)
+  L= 16: mean − M = [+6.89e-03 ± 1.3e-03, +2.05e-03 ± 5.5e-04; +3.09e-03 ± 6.7e-04]  (entries 11, 12; 22)
+  L= 32: mean − M = [+1.15e-03 ± 4.7e-04, +2.37e-04 ± 2.2e-04; +4.72e-04 ± 2.6e-04]  (entries 11, 12; 22)
+levels at L=32:
+     base n=  32 T=      1 N= 1024  E=2.20e+00±6.1e-04 sd=7.84e-02  CG it=133  CPU/sample=0.143s  CPU share=0.060
+     Δh_0 n=  40 T=      1 N= 1024  E=1.83e-03±1.2e-06 sd=1.49e-04  CG it=307  CPU/sample=0.423s  CPU share=0.178
+     ΔT_0 n=  40 T=      4 N=  256  E=7.23e-02±9.6e-05 sd=6.13e-03  CG it=493  CPU/sample=0.785s  CPU share=0.082
+     Δh_1 n=  51 T=      4 N=  256  E=8.45e-04±1.0e-06 sd=6.48e-05  CG it=744  CPU/sample=1.635s  CPU share=0.172
+     ΔT_1 n=  51 T=     16 N=   64  E=3.82e-02±1.5e-04 sd=4.69e-03  CG it=1124  CPU/sample=3.000s  CPU share=0.079
+     Δh_2 n=  64 T=     16 N=   64  E=2.87e-04±6.4e-07 sd=2.06e-05  CG it=1614  CPU/sample=5.464s  CPU share=0.143
+     ΔT_2 n=  64 T=     64 N=   16  E=1.59e-02±1.9e-04 sd=3.04e-03  CG it=2182  CPU/sample=8.671s  CPU share=0.057
+     Δh_3 n=  81 T=     64 N=   16  E=9.87e-05±4.3e-07 sd=6.87e-06  CG it=2901  CPU/sample=16.146s  CPU share=0.106
+     ΔT_3 n=  81 T=    256 N=    4  E=5.24e-03±1.8e-04 sd=1.43e-03  CG it=3473  CPU/sample=24.677s  CPU share=0.041
+     Δh_4 n= 102 T=    256 N=    4  E=2.98e-05±2.7e-07 sd=2.13e-06  CG it=4221  CPU/sample=37.168s  CPU share=0.061
+     ΔT_4 n= 102 T=   1024 N=    1  E=1.47e-03±1.0e-04 sd=4.08e-04  CG it=4892  CPU/sample=50.996s  CPU share=0.021

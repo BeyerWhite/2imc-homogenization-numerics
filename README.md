@@ -42,6 +42,10 @@ python -m venv .venv && .venv/bin/pip install numpy scipy matplotlib
 .venv/bin/python make_plots.py --variants
 .venv/bin/python baselines.py --element P --p 3 --L 4 8 16 32 --reals 256 128 64 32 --nu 0.5 --kmax 75   # likewise --nu 1.5
 .venv/bin/python compare_methods.py --p 3 --variant _nu0.5_kmax75
+# anisotropic test (results kept in */anisotropic/)
+.venv/bin/python validate.py --aniso
+.venv/bin/python run_experiments.py --element P --p 3 --L 4 8 16 32 --reps 128 64 32 16 --aniso 4 --theta 30 --out results/anisotropic
+.venv/bin/python make_plots.py --aniso
 ```
 
 The Q_p results were made with the same commands and `--element Q` (`plot_corrector.py --element Q`).
@@ -319,6 +323,47 @@ CG work to reach the 2IMC's accuracy, as a ratio to the 2IMC with Eq. (11) sizes
   the same for all methods (they share the finest state); the comparison is at equal
   statistical error.
 
+
+### Anisotropic coefficient with exact ā = M (test 3, P3 triangles)
+
+The anisotropic test described above (a(x) = s(M^(−1/2) x) · M, M with eigenvalues 2 and ½
+rotated by 30°), run with the main settings: L = 4, 8, 16, 32 with 128, 64, 32, 16 runs. All
+of its files are kept apart from the isotropic results: `results/anisotropic/`,
+`logs/anisotropic/` and `figures/anisotropic/tri_p3_aniso4_theta30_*` (summary table in
+`…_summary.txt`, entry-wise errors in `…_entries.png`).
+
+| | anisotropic, ā = M | isotropic baseline, ā = I |
+|---|---|---|
+| RMS error, slope in L | −2.01 [−2.19, −1.89] | −1.99 [−2.10, −1.90] |
+| statistical part, slope | −1.95 [−1.96, −1.94] | −1.94 [−1.96, −1.93] |
+| bias, slope | −1.87 | −1.90 |
+| RMS error at L = 32 (relative to \|ā\|_F) | 2.8e-3 (1.3e-3) | 2.2e-3 (1.5e-3) |
+| CG work, slope | 4.79 | 4.80 |
+| CG work / (L⁴ log²L) at L = 4, 8, 16, 32 (×10⁴) | 6.9, 6.9, 6.1, 5.9 | 7.1, 7.4, 6.6, 6.2 |
+| level decay at L = 32: std Δh_k, std ΔT_k | 2^(−1.55k), 2^(−0.95k) | 2^(−1.39k), 2^(−1.01k) |
+
+RMS error per entry, slope in L (`…_entries.png`): ā₁₁ −2.02, ā₁₂ −1.99, ā₂₂ −2.02.
+
+- **Theorem 17 holds unchanged for a full, rotated ā.** Error and cost behave as in the
+  isotropic case: the RMS error decays like L⁻² in the Frobenius norm and in every entry,
+  including the off-diagonal one, and CG work over L⁴ log²L stays flat (it falls slightly,
+  as before). Relative to the size of ā, the anisotropic error is slightly smaller than the
+  isotropic one, and the cost is about 5% lower.
+- **The estimate converges to the exact M** in every entry. Mean of the 16 estimates at L = 32: [[1.62615, 0.64976], [0.64976, 0.87547]],
+  against M = [[1.625, 0.64952], [0.64952, 0.875]]. The deviations are +1.15e-3 ± 4.7e-4,
+  +2.4e-4 ± 2.2e-4 and +4.7e-4 ± 2.6e-4 for the entries 11, 12, 22, so only ā₁₁ is clearly
+  resolved at L = 32.
+- **The bias is positive and roughly proportional to M.** At every L the averaged error
+  a_MC − M is a positive definite matrix (at L = 16: [[6.9, 2.1], [2.1, 3.1]] × 10⁻³,
+  eigenvalues 2.2e-3 and 7.8e-3; at L = 32 the smaller eigenvalue, 4e-4, is within noise).
+  The same holds in the isotropic runs at every L (e.g. 3.6e-3 · I at L = 16). A positive sign
+  is consistent with the two approximations the 2IMC keeps at its finest state: the
+  conforming FEM and the massive term 1/T can both only raise the corrector energy.
+  Divided entry-wise by M, the bias at L = 16 is 4.2, 3.2 and 3.5 × 10⁻³, close to the
+  isotropic 3.6 × 10⁻³. That is what one expects for the part due to the massive term,
+  which the substitution x = M^(1/2) y carries over unchanged. The substitution does not
+  preserve the square torus or the mesh, so the match is not exact: ā₁₁ is somewhat
+  higher at every L. The bias decays like L^(−1.87), about as fast as the statistical part.
 
 ## Results, Q_p on quadrilaterals
 

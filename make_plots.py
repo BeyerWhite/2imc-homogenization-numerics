@@ -124,6 +124,12 @@ def fmt_ci(ci):
 
 
 # --------------------------------------------------------------------------------------
+def _wrap(title, width=75):
+    """Break long single-axis titles (the anisotropic label) so they fit the figure."""
+    import textwrap
+    return textwrap.fill(title, width)
+
+
 def plot_all(p, runs, tag, el, cis):
     """tag: file prefix (e.g. 'tri_p3'); el: element label for titles (e.g. 'P3 triangles')."""
     import matplotlib
@@ -158,7 +164,7 @@ def plot_all(p, runs, tag, el, cis):
     ax.set_xticks(Ls); ax.set_xticklabels([str(int(x)) for x in Ls])
     ax.set_xlabel("box size L"); ax.set_ylabel("error in homogenized matrix (Frobenius norm)")
     ref = "I" if np.allclose(runs[0]["ref"], np.eye(2)) else "M (exact)"
-    ax.set_title(f"Accuracy of the 2IMC estimator, {el}, reference ā = {ref}" + ("" if p >= 3 else "\n(p < d+1: outside Thm 17)"))
+    ax.set_title(_wrap(f"Accuracy of the 2IMC estimator, {el}, reference ā = {ref}") + ("" if p >= 3 else "\n(p < d+1: outside Thm 17)"))
     ax.legend(fontsize=8, loc="lower left")
     fig.text(0.01, 0.005, "faint dots: individual estimator runs;  "
              + ", ".join(f"L={int(r['L'])}: {r['R']} runs" for r in runs), fontsize=7, color=MUTED)
@@ -204,7 +210,7 @@ def plot_all(p, runs, tag, el, cis):
     ax.set_xticks(range(len(longest["levels"])))
     ax.set_xticklabels([lv["label"] for lv in longest["levels"]], rotation=45, fontsize=8)
     ax.set_yscale("log"); ax.set_ylabel("share of total CPU time")
-    ax.set_title(f"Where the time goes: cost share per term of Eq. (5), {el}")
+    ax.set_title(_wrap(f"Where the time goes: cost share per term of Eq. (5), {el}"))
     ax.legend(fontsize=8)
     fig.tight_layout()
     fig.savefig(os.path.join(OUT, f"{tag}_cost_breakdown.png"), dpi=160)
@@ -243,7 +249,7 @@ def plot_all(p, runs, tag, el, cis):
     ax.plot(cc, rm[-1] * (cc / cpu[-1]) ** -0.5, color=MUTED, lw=1, label="cost$^{-1/2}$  (Monte Carlo optimum, [Mou19])")
     ax.set_xscale("log"); ax.set_yscale("log")
     ax.set_xlabel("CPU seconds per estimator run"); ax.set_ylabel("RMS error")
-    ax.set_title(f"Accuracy versus cost, {el}")
+    ax.set_title(_wrap(f"Accuracy versus cost, {el}"))
     ax.legend(fontsize=8)
     fig.tight_layout()
     fig.savefig(os.path.join(OUT, f"{tag}_error_vs_cost.png"), dpi=160)
