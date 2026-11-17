@@ -25,6 +25,7 @@ Two finite-element families are implemented, and every result exists for both:
 | `make_plots.py` | analysis with bootstrap intervals, the figures in `figures/` and `figures/{tri_}p{p}_summary.txt`; `--element P` (default) or `Q`; `--variants` draws the robustness figure `figures/tri_p3_robustness.png`; `--aniso` analyses the anisotropic test into `figures/anisotropic/` |
 | `baselines.py` | coupled solves along the pure h-ladder and the pure T-ladder that end at the 2IMC's finest state; writes `results/baselines_tri_p{p}.{npz,json}` |
 | `compare_methods.py` | cost of plain MC, single-index MLMC in h, single-index MLMC in T and the 2IMC (Eq. 11 and variance-optimal sample sizes) at equal accuracy; writes `figures/tri_p{p}_methods*` and `figures/tri_p{p}_sample_sizes.png`; `--variant _nu0.5_kmax75` repeats it for a robustness field (`baselines.py` takes the same `--nu`/`--kmax`/`--beta`/`--ell` flags) |
+| `report/` | `2imc_numerics_report.pdf`, a 6-page summary of all results with the key figures; rebuilt by `report/make_report.py` (needs `reportlab`) |
 
 ```
 python -m venv .venv && .venv/bin/pip install numpy scipy matplotlib
